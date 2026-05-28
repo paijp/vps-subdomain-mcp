@@ -1,0 +1,117 @@
+// vps-proxy: TLS SNI passthrough proxy for port 443.
+// Reads the TLS ClientHello, extracts the SNI hostname, and TCP-proxies
+// the connection to the matching container without decrypting the traffic.
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"time"
+
+	"github.com/paijp/vps-subdomain-mcp/proxy/internal/activation"
+	"github.com/paijp/vps-subdomain-mcp/proxy/mapping"
+	"github.com/paijp/vps-subdomain-mcp/proxy/routes"
+	"github.com/paijp/vps-subdomain-mcp/proxy/sni"
+)
+
+func main() {
+	domain  := flag.String("domain", "", "base domain, e.g. example.com (required)")
+	listBin := flag.String("list-containers", "/usr/local/bin/list-containers", "path to list-containers binary")
+	listen  := flag.String("listen", ":443", "fallback listen address (used when not under systemd)")
+	flag.Parse()
+
+	if *domain == "" {
+		fmt.Fprintln(os.Stderr, "vps-proxy: -domain is required")
+		os.Exit(1)
+	}
+
+	table := routes.New(*listBin)
+
+	ls, err := activation.Listeners()
+	if err != nil {
+		log.Fatalf("activation: %v", err)
+	}
+	var ln net.Listener
+	if len(ls) > 0 {
+		ln = ls[0]
+	} else {
+		ln, err = net.Listen("tcp", *listen)
+		if err != nil {
+			log.Fatalf("listen %s: %v", *listen, err)
+		}
+	}
+	log.Printf("vps-proxy: listening on %s (domain=%s)", ln.Addr(), *domain)
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("accept: %v", err)
+			continue
+		}
+		go handle(conn, *domain, table)
+	}
+}
+
+func handle(conn net.Conn, domain string, table *routes.Table) {
+	defer conn.Close()
+
+	// Read TLS record header (5 bytes).
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	hdr := make([]byte, 5)
+	if _, err := io.ReadFull(conn, hdr); err != nil {
+		return
+	}
+	if hdr[0] != 0x16 { // not a TLS handshake record
+		return
+	}
+	recLen := int(hdr[3])<<8 | int(hdr[4])
+	if recLen > 16384 { // RFC 8446 §5.1: max TLS record payload
+		return
+	}
+
+	// Read the record body.
+	body := make([]byte, recLen)
+	if _, err := io.ReadFull(conn, body); err != nil {
+		return
+	}
+	conn.SetReadDeadline(time.Time{})
+
+	full := append(hdr, body...) // header + body for SNI parsing and replay
+
+	hostname, err := sni.Extract(full)
+	if err != nil {
+		log.Printf("sni: %v", err)
+		return
+	}
+
+	containerName, err := mapping.ContainerName(hostname, domain)
+	if err != nil {
+		log.Printf("mapping %q: %v", hostname, err)
+		return
+	}
+
+	ip, ok := table.LookupIP(containerName)
+	if !ok {
+		log.Printf("no route: %s → %s", hostname, containerName)
+		return
+	}
+
+	backend, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "443"), 10*time.Second)
+	if err != nil {
+		log.Printf("dial %s: %v", ip, err)
+		return
+	}
+	defer backend.Close()
+
+	// Replay the already-read bytes before bidirectional copy.
+	if _, err := backend.Write(full); err != nil {
+		return
+	}
+
+	go io.Copy(backend, conn) //nolint:errcheck
+	io.Copy(conn, backend)    //nolint:errcheck
+}
