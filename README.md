@@ -39,6 +39,10 @@ container/
   systemd/mcp-server.service
   systemd/vps-mcp-init.sh   first-boot init (run via podman exec)
   systemd/certbot-deploy.sh renewal deploy hook
+host/
+  systemd/vps-proxy.service       host proxy unit (reads DOMAIN from /etc/vps-mcp/host.env)
+  systemd/vps-proxy-http.service
+  nftables/vps-mcp.nft            OUTPUT restriction for non-root users
 Makefile
 ```
 
@@ -56,20 +60,18 @@ Run once as root on the host:
 make setup DOMAIN=example.com
 ```
 
-This builds the container image (`vps-mcp:latest`) and installs the proxy binaries:
+This:
+1. Builds the container image (`vps-mcp:latest`)
+2. Builds and installs the Go proxy binaries:
 
-| Binary | Path |
-|---|---|
-| `list-containers` | `/usr/local/bin/list-containers` (setuid root) |
-| `vps-proxy` | `/usr/local/sbin/vps-proxy` |
-| `vps-proxy-http` | `/usr/local/sbin/vps-proxy-http` |
+   | Binary | Path |
+   |---|---|
+   | `list-containers` | `/usr/local/bin/list-containers` (setuid root) |
+   | `vps-proxy` | `/usr/local/sbin/vps-proxy` |
+   | `vps-proxy-http` | `/usr/local/sbin/vps-proxy-http` |
 
-Start the proxies (systemd units not included yet — adapt to your init system):
-
-```sh
-vps-proxy      -domain example.com
-vps-proxy-http -domain example.com
-```
+3. Installs `vps-proxy.service` and `vps-proxy-http.service` to `/etc/systemd/system/`, writes `/etc/vps-mcp/host.env` with `DOMAIN=example.com`, and enables+starts both services.
+4. Installs `/etc/nftables.d/vps-mcp.nft` (restricts outbound connections to root only), adds an include to `/etc/nftables.conf` if needed, enables `nftables.service`, and applies the rules immediately with `nft -f`.
 
 ## Creating a VPS container
 
@@ -119,6 +121,7 @@ The `/token` endpoint is additionally restricted to Anthropic's IP range (`160.7
 - `set_real_ip_from` is scoped to the single gateway IP (`10.89.0.1`), not the whole subnet.
 - The `client_secret` file is deleted after first use; only a SHA-256 hash of the issued token is retained on disk.
 - The MCP server listens on `127.0.0.1:3000` only.
+- `vps-mcp.nft` blocks new outbound connections from non-root host users; responses to root-initiated connections (established/related) are always allowed.
 
 ## License
 

@@ -1,0 +1,23 @@
+# vps-mcp.nft — host OUTPUT restriction
+#
+# Prevents compromised non-root user accounts from making new outbound
+# connections.  Root (proxy services, podman, system daemons) is unrestricted.
+# Responses to established connections are always allowed.
+
+table inet vps-mcp {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Loopback always allowed.
+        oif lo accept
+
+        # Root unrestricted (proxy services, podman, apt, ...).
+        meta skuid 0 accept
+
+        # Allow responses to connections already established by root.
+        ct state established,related accept
+
+        # Block new outbound connections from non-root users.
+        ct state new reject with icmpx type admin-prohibited
+    }
+}
