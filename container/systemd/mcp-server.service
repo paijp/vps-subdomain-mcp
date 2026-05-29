@@ -1,0 +1,18 @@
+[Unit]
+Description=VPS MCP Server
+After=vps-mcp-init.service network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vps-mcp-env
+ExecStart=/usr/bin/node /opt/mcp/index.mjs
+Restart=on-failure
+RestartSec=5
+
+# Harden: no new privileges, private /tmp, read-only /usr.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

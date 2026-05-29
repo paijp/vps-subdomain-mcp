@@ -1,0 +1,82 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Base system ──────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    systemd systemd-sysv dbus \
+    nginx certbot python3-certbot \
+    openssl ca-certificates \
+    postfix s-nail \
+    curl gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Node.js 20 ───────────────────────────────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Disable unwanted units ────────────────────────────────────────────────────
+RUN systemctl mask \
+    getty@tty1.service \
+    console-getty.service \
+    systemd-logind.service \
+    apt-daily.timer \
+    apt-daily-upgrade.timer \
+    motd-news.timer \
+    e2scrub_reap.service
+
+# ── Self-signed certificate (replaced by certbot on first boot) ───────────────
+RUN mkdir -p /etc/nginx/ssl \
+    && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+       -keyout /etc/nginx/ssl/privkey.pem \
+       -out    /etc/nginx/ssl/fullchain.pem \
+       -subj   "/CN=localhost"
+
+# ── nginx configuration ───────────────────────────────────────────────────────
+COPY nginx/vps-mcp.conf /etc/nginx/sites-available/vps-mcp.conf
+RUN rm -f /etc/nginx/sites-enabled/default \
+    && ln -s /etc/nginx/sites-available/vps-mcp.conf /etc/nginx/sites-enabled/vps-mcp.conf
+
+# ── Postfix nullclient ────────────────────────────────────────────────────────
+# Full config is applied by vps-mcp-init.service at runtime (sets myhostname).
+# Pre-configure the parts that are static.
+RUN postconf -e \
+    "relayhost = [10.89.0.1]:25" \
+    "inet_interfaces = loopback-only" \
+    "mydestination =" \
+    "local_transport = error: local delivery disabled"
+
+# ── MCP server ────────────────────────────────────────────────────────────────
+RUN mkdir -p /opt/mcp
+COPY mcp/package.json /opt/mcp/package.json
+RUN cd /opt/mcp && npm install --omit=dev
+
+COPY mcp/index.mjs /opt/mcp/index.mjs
+
+# ── systemd units and scripts ─────────────────────────────────────────────────
+COPY systemd/vps-mcp-init.service  /etc/systemd/system/vps-mcp-init.service
+COPY systemd/mcp-server.service    /etc/systemd/system/mcp-server.service
+COPY systemd/vps-mcp-init.sh       /usr/local/bin/vps-mcp-init.sh
+COPY systemd/certbot-deploy.sh     /usr/local/bin/certbot-deploy.sh
+
+RUN chmod +x /usr/local/bin/vps-mcp-init.sh \
+             /usr/local/bin/certbot-deploy.sh
+
+RUN systemctl enable \
+    vps-mcp-init.service \
+    mcp-server.service \
+    nginx \
+    postfix \
+    certbot.timer
+
+# ── certbot deploy hook ───────────────────────────────────────────────────────
+RUN mkdir -p /etc/letsencrypt/renewal-hooks/deploy \
+    && ln -s /usr/local/bin/certbot-deploy.sh \
+             /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+
+# ── Webroot directory for certbot --webroot ───────────────────────────────────
+RUN mkdir -p /var/www/html/.well-known/acme-challenge
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

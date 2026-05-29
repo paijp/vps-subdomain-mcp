@@ -1,0 +1,14 @@
+[Unit]
+Description=VPS MCP first-boot initialisation
+# Must complete before nginx and the MCP server start.
+Before=nginx.service mcp-server.service
+After=network.target
+ConditionPathExists=!/etc/vps-mcp-env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/vps-mcp-init.sh
+
+[Install]
+WantedBy=multi-user.target
