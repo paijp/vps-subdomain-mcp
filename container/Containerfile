@@ -39,8 +39,7 @@ RUN rm -f /etc/nginx/sites-enabled/default \
     && ln -s /etc/nginx/sites-available/vps-mcp.conf /etc/nginx/sites-enabled/vps-mcp.conf
 
 # ── Postfix nullclient ────────────────────────────────────────────────────────
-# Full config is applied by vps-mcp-init.service at runtime (sets myhostname).
-# Pre-configure the parts that are static.
+# myhostname is set by vps-mcp-init.sh at runtime.
 RUN postconf -e \
     "relayhost = [10.89.0.1]:25" \
     "inet_interfaces = loopback-only" \
@@ -55,7 +54,8 @@ RUN cd /opt/mcp && npm install --omit=dev
 COPY mcp/index.mjs /opt/mcp/index.mjs
 
 # ── systemd units and scripts ─────────────────────────────────────────────────
-COPY systemd/vps-mcp-init.service  /etc/systemd/system/vps-mcp-init.service
+# mcp-server.service is NOT enabled here; vps-mcp-init.sh calls
+# "systemctl enable --now mcp-server" after writing /etc/vps-mcp-env.
 COPY systemd/mcp-server.service    /etc/systemd/system/mcp-server.service
 COPY systemd/vps-mcp-init.sh       /usr/local/bin/vps-mcp-init.sh
 COPY systemd/certbot-deploy.sh     /usr/local/bin/certbot-deploy.sh
@@ -64,8 +64,6 @@ RUN chmod +x /usr/local/bin/vps-mcp-init.sh \
              /usr/local/bin/certbot-deploy.sh
 
 RUN systemctl enable \
-    vps-mcp-init.service \
-    mcp-server.service \
     nginx \
     postfix \
     certbot.timer

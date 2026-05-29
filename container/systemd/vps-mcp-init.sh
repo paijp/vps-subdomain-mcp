@@ -1,75 +1,67 @@
 #!/bin/bash
 # vps-mcp-init.sh: first-boot initialisation for a VPS seminar container.
-# Reads SUBDOMAIN and NOTIFY_EMAIL from the container environment
-# (passed via Podman --env / Quadlet Environment=), then:
-#   1. Writes /etc/vps-mcp-env for subsequent service units.
-#   2. Generates /etc/mcp-server/secret and /etc/mcp-server/token.
-#   3. Configures Postfix myhostname.
-#   4. Substitutes __SUBDOMAIN__ in the nginx config.
-#   5. Requests a Let's Encrypt certificate (certonly --webroot).
-#   6. Replaces self-signed cert paths in nginx config with live cert paths.
+# Run once via: podman exec <name>-web /usr/local/bin/vps-mcp-init.sh
 #
-# The ConditionPathExists=!/etc/vps-mcp-env guard in the .service unit
-# ensures this script runs only once.
+# Steps:
+#   1. Write /etc/vps-mcp-env  (for mcp-server.service EnvironmentFile=)
+#   2. Generate /etc/mcp-server/secret and /etc/mcp-server/token
+#   3. Configure Postfix myhostname
+#   4. Substitute server_name in the nginx config; reload nginx
+#   5. Run certbot certonly --webroot
+#   6. Switch nginx cert paths to Let's Encrypt; reload nginx
+#   7. systemctl enable --now mcp-server
 set -euo pipefail
 
-# ── 1. Read environment ───────────────────────────────────────────────────────
-# When running under systemd inside a container, environment variables set
-# on the container (podman run --env or Quadlet Environment=) are available
-# in the process environment.
 SUBDOMAIN="${SUBDOMAIN:-}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 
 if [[ -z "$SUBDOMAIN" ]]; then
-    echo "vps-mcp-init: SUBDOMAIN not set, aborting" >&2
-    exit 1
+    echo "vps-mcp-init: SUBDOMAIN not set" >&2; exit 1
 fi
 
-# Persist for other units (mcp-server.service uses EnvironmentFile=).
+# ── 1. /etc/vps-mcp-env ──────────────────────────────────────────────────────
 cat > /etc/vps-mcp-env <<EOF
 SUBDOMAIN=${SUBDOMAIN}
 NOTIFY_EMAIL=${NOTIFY_EMAIL}
 EOF
 chmod 640 /etc/vps-mcp-env
 
-# ── 2. MCP server credentials ────────────────────────────────────────────────
-# secret: client_secret for the /token endpoint (single-use, given to participant)
-# token:  the bearer token to be issued (single-use, pre-generated)
+# ── 2. MCP credentials ───────────────────────────────────────────────────────
 mkdir -p /etc/mcp-server
 chmod 700 /etc/mcp-server
 openssl rand -hex 32 > /etc/mcp-server/secret
 openssl rand -hex 32 > /etc/mcp-server/token
 chmod 600 /etc/mcp-server/secret /etc/mcp-server/token
-
 echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
 postconf -e "myhostname = ${SUBDOMAIN}"
-systemctl reload-or-restart postfix || true
+systemctl reload-or-restart postfix
 
-# ── 4. nginx: substitute __SUBDOMAIN__ ───────────────────────────────────────
+# ── 4. nginx: replace server_name placeholder ────────────────────────────────
 NGINX_CONF=/etc/nginx/sites-available/vps-mcp.conf
-sed -i "s/__SUBDOMAIN__/${SUBDOMAIN}/g" "${NGINX_CONF}"
+sed -i "s/server_name _;/server_name ${SUBDOMAIN};/g" "${NGINX_CONF}"
+nginx -t && systemctl reload nginx
 
-# Start nginx with self-signed cert so the ACME challenge path is reachable.
-systemctl reload-or-restart nginx || systemctl start nginx
-
-# ── 5. certbot: obtain certificate ───────────────────────────────────────────
+# ── 5. certbot ───────────────────────────────────────────────────────────────
 certbot certonly \
-    --webroot \
-    --webroot-path /var/www/html \
-    --non-interactive \
-    --agree-tos \
+    --webroot --webroot-path /var/www/html \
+    --non-interactive --agree-tos \
     --register-unsafely-without-email \
     --domain "${SUBDOMAIN}" \
-    || { echo "vps-mcp-init: certbot failed, keeping self-signed cert" >&2; exit 0; }
+    || { echo "vps-mcp-init: certbot failed, keeping self-signed cert" >&2
+         systemctl enable --now mcp-server
+         exit 0; }
 
-# ── 6. nginx: switch to Let's Encrypt certificate ────────────────────────────
+# ── 6. nginx: switch to Let's Encrypt cert ───────────────────────────────────
 LIVE_DIR="/etc/letsencrypt/live/${SUBDOMAIN}"
 sed -i \
     -e "s|ssl_certificate .*|ssl_certificate     ${LIVE_DIR}/fullchain.pem;|" \
     -e "s|ssl_certificate_key .*|ssl_certificate_key ${LIVE_DIR}/privkey.pem;|" \
     "${NGINX_CONF}"
-
 nginx -t && systemctl reload nginx
+
+# ── 7. mcp-server ────────────────────────────────────────────────────────────
+systemctl enable --now mcp-server
+
 echo "vps-mcp-init: done (${SUBDOMAIN})"

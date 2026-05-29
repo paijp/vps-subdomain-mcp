@@ -1,6 +1,6 @@
 [Unit]
 Description=VPS MCP Server
-After=vps-mcp-init.service network.target
+After=network.target
 
 [Service]
 Type=simple
