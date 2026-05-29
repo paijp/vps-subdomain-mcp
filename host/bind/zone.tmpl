@@ -1,0 +1,12 @@
+$TTL 300
+@   IN SOA  ns1.__DOMAIN__. hostmaster.__DOMAIN__. (
+                __SERIAL__ ; serial (YYYYMMDDnn)
+                3600       ; refresh
+                900        ; retry
+                604800     ; expire
+                300 )      ; minimum
+
+    IN NS   ns1.__DOMAIN__.
+ns1 IN A    __IP__
+@   IN A    __IP__
+*   IN A    __IP__
