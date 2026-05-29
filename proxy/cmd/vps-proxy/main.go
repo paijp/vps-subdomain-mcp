@@ -112,11 +112,16 @@ func handle(conn net.Conn, domain string, table *routes.Table) {
 	//     PROXY v2 starts with 0x0D — neither is a TLS handshake record).
 	//  3. The header we generate is derived solely from conn.RemoteAddr().
 	//  4. Write order: PROXY header → peeked TLS data → io.Copy.
-	if _, err := fmt.Fprintf(backend, "PROXY TCP4 %s %s %d %d\r\n",
-		conn.RemoteAddr().(*net.TCPAddr).IP,
-		conn.LocalAddr().(*net.TCPAddr).IP,
-		conn.RemoteAddr().(*net.TCPAddr).Port,
-		conn.LocalAddr().(*net.TCPAddr).Port,
+	srcAddr := conn.RemoteAddr().(*net.TCPAddr)
+	dstAddr := conn.LocalAddr().(*net.TCPAddr)
+	proto := "TCP4"
+	if srcAddr.IP.To4() == nil {
+		proto = "TCP6"
+	}
+	if _, err := fmt.Fprintf(backend, "PROXY %s %s %s %d %d\r\n",
+		proto,
+		srcAddr.IP, dstAddr.IP,
+		srcAddr.Port, dstAddr.Port,
 	); err != nil {
 		return
 	}
