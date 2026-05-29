@@ -107,7 +107,26 @@ func handle(conn net.Conn, domain string, table *routes.Table) {
 	}
 	defer backend.Close()
 
-	// Replay the already-read bytes before bidirectional copy.
+	// PROXY protocol v1: convey the real client IP to the container's nginx so
+	// that backend ACLs (e.g. allow 160.79.104.0/21 on /token) work correctly.
+	//
+	// Security properties:
+	//  1. We never read, trust, or forward any PROXY header from the client.
+	//  2. Client-supplied PROXY headers are naturally rejected: the SNI parser
+	//     returns early when data[0] != 0x16 (PROXY v1 starts with 'P'=0x50,
+	//     PROXY v2 starts with 0x0D — neither is a TLS handshake record).
+	//  3. The header we generate is derived solely from conn.RemoteAddr().
+	//  4. Write order: PROXY header → peeked TLS data → io.Copy.
+	if _, err := fmt.Fprintf(backend, "PROXY TCP4 %s %s %d %d\r\n",
+		conn.RemoteAddr().(*net.TCPAddr).IP,
+		conn.LocalAddr().(*net.TCPAddr).IP,
+		conn.RemoteAddr().(*net.TCPAddr).Port,
+		conn.LocalAddr().(*net.TCPAddr).Port,
+	); err != nil {
+		return
+	}
+
+	// Replay the already-read TLS bytes, then copy bidirectionally.
 	if _, err := backend.Write(full); err != nil {
 		return
 	}
