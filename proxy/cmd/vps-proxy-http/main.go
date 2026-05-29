@@ -1,17 +1,21 @@
-// vps-proxy-http: HTTP reverse proxy for port 80.
-// Forwards all HTTP requests to the container matching the Host header.
-// No redirect logic; the container's own nginx handles HTTP→HTTPS if needed.
+// vps-proxy-http: TCP passthrough proxy for port 80.
+// Reads the first HTTP request bytes, extracts the Host header,
+// and TCP-proxies the connection to the matching container without
+// any header modification.  HTTPS redirect responsibility lies with
+// the container's nginx.
+// Must be run under vps-proxy80.socket (systemd socket activation).
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/paijp/vps-subdomain-mcp/proxy/internal/activation"
 	"github.com/paijp/vps-subdomain-mcp/proxy/mapping"
@@ -21,7 +25,6 @@ import (
 func main() {
 	domain  := flag.String("domain", "", "base domain, e.g. example.com (required)")
 	listBin := flag.String("list-containers", "/usr/local/bin/list-containers", "path to list-containers binary")
-	listen  := flag.String("listen", ":80", "fallback listen address (used when not under systemd)")
 	flag.Parse()
 
 	if *domain == "" {
@@ -35,48 +38,71 @@ func main() {
 	if err != nil {
 		log.Fatalf("activation: %v", err)
 	}
-	var ln net.Listener
-	if len(ls) > 0 {
-		ln = ls[0]
-	} else {
-		ln, err = net.Listen("tcp", *listen)
-		if err != nil {
-			log.Fatalf("listen %s: %v", *listen, err)
-		}
+	if len(ls) == 0 {
+		log.Fatal("vps-proxy-http: no socket activation listener; run under vps-proxy80.socket")
 	}
+	ln := ls[0]
 	log.Printf("vps-proxy-http: listening on %s (domain=%s)", ln.Addr(), *domain)
 
-	srv := &http.Server{
-		Handler: &handler{domain: *domain, table: table},
-	}
-	if err := srv.Serve(ln); err != nil {
-		log.Fatal(err)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("accept: %v", err)
+			continue
+		}
+		go handle(conn, *domain, table)
 	}
 }
 
-type handler struct {
-	domain string
-	table  *routes.Table
-}
+func handle(conn net.Conn, domain string, table *routes.Table) {
+	defer conn.Close()
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	containerName, err := mapping.ContainerName(r.Host, h.domain)
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 8192)
+	n, err := conn.Read(buf)
+	conn.SetReadDeadline(time.Time{})
+	if err != nil || n == 0 {
+		return
+	}
+	data := buf[:n]
+
+	// Extract the Host header value from the raw HTTP request.
+	var host string
+	for _, line := range bytes.Split(data, []byte("\r\n")) {
+		lower := strings.ToLower(string(line))
+		if strings.HasPrefix(lower, "host:") {
+			host = strings.TrimSpace(string(line[5:]))
+			break
+		}
+	}
+	if host == "" {
+		return
+	}
+
+	containerName, err := mapping.ContainerName(host, domain)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		log.Printf("mapping %q: %v", host, err)
 		return
 	}
 
-	ip, ok := h.table.LookupIP(containerName)
+	ip, ok := table.LookupIP(containerName)
 	if !ok {
-		http.Error(w, "container not running", http.StatusBadGateway)
+		log.Printf("no route: %s → %s", host, containerName)
 		return
 	}
 
-	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(ip, "80")}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("proxy error %s: %v", r.Host, err)
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+	backend, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "80"), 10*time.Second)
+	if err != nil {
+		log.Printf("dial %s: %v", ip, err)
+		return
 	}
-	proxy.ServeHTTP(w, r)
+	defer backend.Close()
+
+	// Replay the buffered bytes, then copy bidirectionally.
+	if _, err := backend.Write(data); err != nil {
+		return
+	}
+
+	go io.Copy(backend, conn) //nolint:errcheck
+	io.Copy(conn, backend)    //nolint:errcheck
 }

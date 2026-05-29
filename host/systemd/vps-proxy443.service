@@ -1,0 +1,36 @@
+[Unit]
+Description=VPS TLS SNI Passthrough Proxy (port 443)
+Requires=vps-proxy443.socket
+After=vps-proxy443.socket
+
+[Service]
+Type=simple
+User=proxy443
+EnvironmentFile=/etc/vps-mcp/host.env
+ExecStart=/usr/local/sbin/vps-proxy -domain ${DOMAIN}
+Restart=on-failure
+RestartSec=5
+
+# Capability hardening — proxy443 needs no capabilities at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+
+# Network: only container subnet and loopback (blocks outbound to internet).
+IPAddressDeny=any
+IPAddressAllow=10.89.0.0/24
+IPAddressAllow=127.0.0.0/8
+
+# Filesystem: strict read-only.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+# Syscall and memory hardening.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

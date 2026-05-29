@@ -44,10 +44,15 @@ sed -i "s/server_name _;/server_name ${SUBDOMAIN};/g" "${NGINX_CONF}"
 nginx -t && systemctl reload nginx
 
 # ── 5. certbot ───────────────────────────────────────────────────────────────
+if [[ -n "${NOTIFY_EMAIL}" ]]; then
+    CERTBOT_EMAIL_FLAGS="--email ${NOTIFY_EMAIL} --no-eff-email"
+else
+    CERTBOT_EMAIL_FLAGS="--register-unsafely-without-email"
+fi
 certbot certonly \
     --webroot --webroot-path /var/www/html \
     --non-interactive --agree-tos \
-    --register-unsafely-without-email \
+    ${CERTBOT_EMAIL_FLAGS} \
     --domain "${SUBDOMAIN}" \
     || { echo "vps-mcp-init: certbot failed, keeping self-signed cert" >&2
          systemctl enable --now mcp-server

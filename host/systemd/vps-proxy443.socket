@@ -1,0 +1,9 @@
+[Unit]
+Description=VPS TLS SNI Passthrough Proxy socket (port 443)
+
+[Socket]
+ListenStream=443
+Accept=no
+
+[Install]
+WantedBy=sockets.target

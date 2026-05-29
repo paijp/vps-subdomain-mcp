@@ -62,7 +62,7 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
 app.get("/authorize", (req, res) => {
   const { redirect_uri, state } = req.query;
   try {
-    if (new URL(redirect_uri).host !== "claude.ai") return res.status(400).send();
+    if (new URL(redirect_uri).hostname !== "claude.ai") return res.status(400).send();
   } catch {
     return res.status(400).send();
   }

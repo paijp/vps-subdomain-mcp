@@ -1,0 +1,32 @@
+[Unit]
+Description=VPS HTTP TCP Passthrough Proxy (port 80)
+Requires=vps-proxy80.socket
+After=vps-proxy80.socket
+
+[Service]
+Type=simple
+User=proxy80
+EnvironmentFile=/etc/vps-mcp/host.env
+ExecStart=/usr/local/sbin/vps-proxy-http -domain ${DOMAIN}
+Restart=on-failure
+RestartSec=5
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+
+IPAddressDeny=any
+IPAddressAllow=10.89.0.0/24
+IPAddressAllow=127.0.0.0/8
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

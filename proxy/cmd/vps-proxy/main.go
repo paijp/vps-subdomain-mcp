@@ -1,6 +1,7 @@
 // vps-proxy: TLS SNI passthrough proxy for port 443.
 // Reads the TLS ClientHello, extracts the SNI hostname, and TCP-proxies
 // the connection to the matching container without decrypting the traffic.
+// Must be run under vps-proxy443.socket (systemd socket activation).
 package main
 
 import (
@@ -21,7 +22,6 @@ import (
 func main() {
 	domain  := flag.String("domain", "", "base domain, e.g. example.com (required)")
 	listBin := flag.String("list-containers", "/usr/local/bin/list-containers", "path to list-containers binary")
-	listen  := flag.String("listen", ":443", "fallback listen address (used when not under systemd)")
 	flag.Parse()
 
 	if *domain == "" {
@@ -35,15 +35,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("activation: %v", err)
 	}
-	var ln net.Listener
-	if len(ls) > 0 {
-		ln = ls[0]
-	} else {
-		ln, err = net.Listen("tcp", *listen)
-		if err != nil {
-			log.Fatalf("listen %s: %v", *listen, err)
-		}
+	if len(ls) == 0 {
+		log.Fatal("vps-proxy: no socket activation listener; run under vps-proxy443.socket")
 	}
+	ln := ls[0]
 	log.Printf("vps-proxy: listening on %s (domain=%s)", ln.Addr(), *domain)
 
 	for {

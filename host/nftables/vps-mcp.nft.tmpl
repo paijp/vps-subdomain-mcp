@@ -1,0 +1,31 @@
+# vps-mcp.nft — host OUTPUT restriction
+#
+# Prevents compromised non-root, non-proxy user accounts from making new
+# outbound connections.  UIDs are substituted at install time by
+# "make install-services" using id(1).
+
+table inet vps-mcp {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Loopback always allowed.
+        oif lo accept
+
+        # Root unrestricted (podman, apt, system daemons, ...).
+        meta skuid 0 accept
+
+        # Proxy service users: allowed to reach containers only.
+        # (systemd IPAddressDeny in the service units blocks external outbound.)
+        meta skuid __UID_PROXY443__ accept
+        meta skuid __UID_PROXY80__  accept
+
+        # Allow responses to connections already established by allowed users.
+        ct state established,related accept
+
+        # Block new connections to the container subnet from all other users.
+        ip daddr 10.89.0.0/24 ct state new reject with icmpx type admin-prohibited
+
+        # Block all other new outbound connections.
+        ct state new reject with icmpx type admin-prohibited
+    }
+}

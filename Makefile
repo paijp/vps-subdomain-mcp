@@ -21,12 +21,12 @@ help:
 	@printf "vps-subdomain-mcp — VPS seminar container management\n\n"
 	@printf "Host setup (run once as root):\n"
 	@printf "  make 203.0.113.1__example.com.setupdone\n"
-	@printf "      Configure hostname, BIND wildcard DNS, proxy services, nftables.\n"
+	@printf "      Hostname, BIND wildcard DNS, vpsmcp-net, proxy sockets, nftables.\n"
 	@printf "      After this, DOMAIN is read from /etc/vps-mcp/host.env automatically.\n\n"
 	@printf "Rebuild components individually:\n"
 	@printf "  make image                Build container image\n"
 	@printf "  make install-binaries     Build and install Go proxy binaries\n"
-	@printf "  make install-services     (Re)install unit files and nftables\n\n"
+	@printf "  make install-services     (Re)install socket units and nftables\n\n"
 	@printf "Container management:\n"
 	@printf "  make alice__alice@ex.com.done   Create VPS for alice\n"
 	@printf "  make list                       List running VPS containers\n\n"
@@ -38,10 +38,11 @@ help:
 #
 # 1. Set hostname to ns1.<domain>
 # 2. Write /etc/vps-mcp/host.env  (DOMAIN, IP)
-# 3. Install BIND9, configure wildcard zone, reload
-# 4. Build container image
-# 5. Install Go proxy binaries
-# 6. Install proxy systemd units + nftables
+# 3. Install BIND9, configure wildcard zone with secondary NS, reload
+# 4. Create vpsmcp-net Podman network (10.89.0.0/24, DNS disabled)
+# 5. Build container image
+# 6. Install Go proxy binaries
+# 7. Install proxy socket units + nftables (with proxy user UID substitution)
 
 %.setupdone:
 	$(eval _IP     := $(call ip_of,$*))
@@ -51,19 +52,33 @@ help:
 	hostnamectl set-hostname ns1.$(_DOMAIN)
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
-	apt-get install -y bind9
-	mkdir -p /etc/bind/zones
+	if command -v apt-get >/dev/null 2>&1; then \
+	    apt-get install -y bind9; \
+	    BIND_ZONE_DIR=/etc/bind/zones; \
+	    BIND_CONF=/etc/bind/named.conf.local; \
+	elif command -v dnf >/dev/null 2>&1; then \
+	    dnf install -y bind bind-utils; \
+	    BIND_ZONE_DIR=/var/named; \
+	    mkdir -p /etc/named; \
+	    BIND_CONF=/etc/named/named.conf.local; \
+	    grep -qF 'include "/etc/named/named.conf.local"' /etc/named.conf || \
+	        printf '\ninclude "/etc/named/named.conf.local";\n' >> /etc/named.conf; \
+	else echo "Error: no supported package manager (apt-get or dnf)"; exit 1; fi; \
+	mkdir -p $$BIND_ZONE_DIR; \
 	sed -e 's|__IP__|$(_IP)|g' \
 	    -e 's|__DOMAIN__|$(_DOMAIN)|g' \
 	    -e "s|__SERIAL__|$$(date +%Y%m%d01)|g" \
-	    host/bind/zone.tmpl > /etc/bind/zones/$(_DOMAIN).zone
-	sed 's|__DOMAIN__|$(_DOMAIN)|g' \
-	    host/bind/named.conf.local.tmpl > /etc/bind/named.conf.local
+	    host/bind/zone.tmpl > $$BIND_ZONE_DIR/$(_DOMAIN).zone; \
+	sed -e 's|__DOMAIN__|$(_DOMAIN)|g' \
+	    -e "s|__BIND_ZONE_DIR__|$$BIND_ZONE_DIR|g" \
+	    host/bind/named.conf.local.tmpl > $$BIND_CONF
 	systemctl enable --now named
 	rndc reload 2>/dev/null || true
+	rndc notify 2>/dev/null || true
+	podman network create --subnet 10.89.0.0/24 --disable-dns vpsmcp-net 2>/dev/null || true
 	$(MAKE) image
 	$(MAKE) install-binaries
-	$(MAKE) install-services DOMAIN=$(_DOMAIN)
+	$(MAKE) install-services DOMAIN=$(_DOMAIN) IP=$(_IP)
 	@touch $@
 
 # ── image ─────────────────────────────────────────────────────────────────────
@@ -87,11 +102,19 @@ install-services:
 	    { echo "Error: DOMAIN is required.  Example: make install-services DOMAIN=example.com"; exit 1; }
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(DOMAIN)" "$(IP)" > /etc/vps-mcp/host.env
-	install -m 644 host/systemd/vps-proxy.service      /etc/systemd/system/
-	install -m 644 host/systemd/vps-proxy-http.service /etc/systemd/system/
+	useradd -r -s /sbin/nologin proxy443 2>/dev/null || true
+	useradd -r -s /sbin/nologin proxy80  2>/dev/null || true
+	install -m 644 host/systemd/vps-proxy443.socket  /etc/systemd/system/
+	install -m 644 host/systemd/vps-proxy443.service /etc/systemd/system/
+	install -m 644 host/systemd/vps-proxy80.socket   /etc/systemd/system/
+	install -m 644 host/systemd/vps-proxy80.service  /etc/systemd/system/
 	systemctl daemon-reload
-	systemctl enable --now vps-proxy vps-proxy-http
-	install -m 644 host/nftables/vps-mcp.nft /etc/nftables.d/vps-mcp.nft
+	systemctl enable --now vps-proxy443.socket vps-proxy80.socket
+	mkdir -p /etc/nftables.d; \
+	UID443=$$(id -u proxy443); UID80=$$(id -u proxy80); \
+	sed -e "s|__UID_PROXY443__|$$UID443|g" \
+	    -e "s|__UID_PROXY80__|$$UID80|g" \
+	    host/nftables/vps-mcp.nft.tmpl > /etc/nftables.d/vps-mcp.nft
 	grep -qF 'include "/etc/nftables.d/*.nft"' /etc/nftables.conf 2>/dev/null || \
 	    printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf
 	systemctl enable nftables
@@ -107,7 +130,10 @@ install-services:
 	podman run -d \
 	    --name     $(call sub_of,$*)-web \
 	    --hostname $(call sub_of,$*).$(DOMAIN) \
+	    --network  vpsmcp-net \
 	    --systemd  always \
+	    --memory   1g \
+	    --pids-limit 200 \
 	    --env      SUBDOMAIN=$(call sub_of,$*).$(DOMAIN) \
 	    --env      NOTIFY_EMAIL=$(call email_of,$*) \
 	    $(IMAGE)

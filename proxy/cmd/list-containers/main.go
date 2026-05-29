@@ -54,7 +54,7 @@ func main() {
 		},
 	}
 
-	resp, err := client.Get("http://d/containers/json?all=true")
+	resp, err := client.Get("http://d/containers/json")
 	if err != nil {
 		fatal("%v", err)
 	}
