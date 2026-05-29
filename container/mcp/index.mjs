@@ -1,8 +1,11 @@
 /**
  * vps-mcp: MCP server for VPS seminar containers.
  *
- * Implements OAuth 2.1 (PKCE) token issuance and the MCP SSE transport.
- * All state is in-process and ephemeral; tokens are single-use, hashed.
+ * OAuth 2.1 flow (same design as paijp/vps-mcp):
+ *   - /authorize  validates redirect_uri host is claude.ai, issues a dummy code
+ *   - /token      validates client_secret against /etc/mcp-server/secret (single-use),
+ *                 issues the pre-generated token from /etc/mcp-server/token (single-use),
+ *                 stores sha256(token) in /etc/mcp-server/hash for future auth
  *
  * Environment variables (set by vps-mcp-init.service):
  *   SUBDOMAIN     – full hostname, e.g. alice.example.com
@@ -10,7 +13,8 @@
  */
 
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -24,123 +28,105 @@ const execFileAsync = promisify(execFile);
 const SUBDOMAIN    = process.env.SUBDOMAIN    || "localhost";
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || "";
 const PORT         = 3000;
-const EXEC_TIMEOUT = 60_000; // ms
+const EXEC_TIMEOUT = 60_000;
 
-// ── Token store ───────────────────────────────────────────────────────────────
-// Pending: code_challenge → { challenge_method, expiry }
-// Issued:  token_hash → expiry
-const pendingCodes = new Map();
-const issuedTokens = new Map();
+const MFN = "/etc/mcp-server";
+const SFN = `${MFN}/secret`;
+const TFN = `${MFN}/token`;
 
-function sha256(str) {
-  return crypto.createHash("sha256").update(str).digest("hex");
-}
-
-function timingSafeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) {
-    // Constant-time compare anyway to avoid length oracle.
-    crypto.timingSafeEqual(ba, Buffer.alloc(ba.length));
-    return false;
-  }
-  return crypto.timingSafeEqual(ba, bb);
-}
-
-// ── OAuth 2.1 / PKCE ──────────────────────────────────────────────────────────
+const sha256 = t => crypto.createHash("sha256").update(t).digest("hex");
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Authorization endpoint — issues an auth code.
-app.get("/authorize", (req, res) => {
-  const { code_challenge, code_challenge_method, redirect_uri, state } = req.query;
-  if (!code_challenge || code_challenge_method !== "S256") {
-    return res.status(400).json({ error: "invalid_request" });
-  }
+// ── OAuth discovery ───────────────────────────────────────────────────────────
 
-  const code = crypto.randomBytes(32).toString("hex");
-  pendingCodes.set(code, {
-    challenge: code_challenge,
-    expiry: Date.now() + 5 * 60 * 1000,
+app.get("/.well-known/oauth-authorization-server", (req, res) => {
+  const host  = req.headers["x-forwarded-host"] || req.headers.host || req.hostname;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol;
+  const base  = `${proto}://${host}`;
+  res.json({
+    issuer:                                base,
+    authorization_endpoint:               `${base}/authorize`,
+    token_endpoint:                        `${base}/token`,
+    token_endpoint_auth_methods_supported: ["client_secret_post"],
+    response_types_supported:             ["code"],
+    code_challenge_methods_supported:     ["S256"],
   });
+});
 
+// ── Authorization endpoint ────────────────────────────────────────────────────
+// Validates that redirect_uri belongs to claude.ai, then issues a dummy code.
+
+app.get("/authorize", (req, res) => {
+  const { redirect_uri, state } = req.query;
+  try {
+    if (new URL(redirect_uri).host !== "claude.ai") return res.status(400).send();
+  } catch {
+    return res.status(400).send();
+  }
   const url = new URL(redirect_uri);
-  url.searchParams.set("code", code);
+  url.searchParams.set("code", "x");
   if (state) url.searchParams.set("state", state);
   res.redirect(302, url.toString());
 });
 
-// Token endpoint — exchanges code+verifier for a bearer token.
-// Access is restricted to 160.79.104.0/21 by nginx.
+// ── Token endpoint ────────────────────────────────────────────────────────────
+// Validates client_secret against /etc/mcp-server/secret (single-use).
+// Issues the pre-generated token from /etc/mcp-server/token (single-use).
+// Restricted to Anthropic IPs (160.79.104.0/21) by nginx.
+
 app.post("/token", (req, res) => {
-  const { grant_type, code, code_verifier } = req.body;
-  if (grant_type !== "authorization_code" || !code || !code_verifier) {
-    return res.status(400).json({ error: "invalid_request" });
+  const { client_secret } = req.body;
+
+  let secret;
+  try { secret = readFileSync(SFN, "utf8").trim(); } catch {
+    return res.status(403).send();
   }
+  if (client_secret !== secret) return res.status(403).send();
 
-  const entry = pendingCodes.get(code);
-  if (!entry || entry.expiry < Date.now()) {
-    pendingCodes.delete(code);
-    return res.status(400).json({ error: "invalid_grant" });
+  // client_id is the "secret marker": it identifies the session in the
+  // notification email but is never stored server-side.
+  const cid = +req.body.client_id;
+  if (!cid) return res.status(403).send();
+
+  try { unlinkSync(SFN); } catch {}
+
+  let token;
+  try { token = readFileSync(TFN, "utf8").trim(); } catch {
+    return res.status(403).send();
   }
+  writeFileSync(`${MFN}/hash`, sha256(token), { mode: 0o600 });
+  try { unlinkSync(TFN); } catch {}
 
-  // Verify PKCE: sha256(verifier) == challenge (base64url, no padding)
-  const expected = entry.challenge;
-  const actual   = crypto.createHash("sha256")
-    .update(code_verifier)
-    .digest("base64url");
-
-  if (!timingSafeEqual(expected, actual)) {
-    return res.status(400).json({ error: "invalid_grant" });
-  }
-  pendingCodes.delete(code);
-
-  const token = crypto.randomBytes(32).toString("hex");
-  issuedTokens.set(sha256(token), Date.now() + 24 * 60 * 60 * 1000);
-
-  // Send notification email asynchronously.
   if (NOTIFY_EMAIL) {
-    const body = `A new MCP token was issued for ${SUBDOMAIN} at ${new Date().toISOString()}.`;
-    execFileAsync("sendmail", ["-t"], {
-      input: [
-        `To: ${NOTIFY_EMAIL}`,
-        `From: noreply@${SUBDOMAIN}`,
-        `Subject: MCP token issued for ${SUBDOMAIN}`,
-        "",
-        body,
-      ].join("\n"),
-    }).catch(() => {});
+    const m = spawn("mail", ["-s", `MCP token issued client_id=${cid}`, NOTIFY_EMAIL]);
+    m.stdin.end("done");
   }
 
-  res.json({ access_token: token, token_type: "Bearer", expires_in: 86400 });
+  setTimeout(() => res.json({ access_token: token, token_type: "Bearer" }), 5000);
 });
 
-// Bearer token validation middleware.
-function requireBearer(req, res, next) {
-  const auth = req.headers.authorization || "";
-  const match = auth.match(/^Bearer\s+(\S+)$/i);
-  if (!match) return res.status(401).json({ error: "unauthorized" });
+// ── Bearer auth middleware ────────────────────────────────────────────────────
 
-  const hash = sha256(match[1]);
-  const expiry = issuedTokens.get(hash);
-  if (!expiry || expiry < Date.now()) {
-    issuedTokens.delete(hash);
-    return res.status(401).json({ error: "unauthorized" });
+function auth(req, res, next) {
+  const t = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  let h;
+  try { h = readFileSync(`${MFN}/hash`, "utf8").trim(); } catch {
+    return res.status(401).send();
   }
+  const hb = Buffer.from(h);
+  const tb = Buffer.from(sha256(t));
+  if (hb.length !== tb.length || !crypto.timingSafeEqual(hb, tb))
+    return res.status(401).send();
   next();
 }
 
 // ── MCP server ────────────────────────────────────────────────────────────────
 
-const mcp = new McpServer({
-  name: "vps-mcp",
-  version: "1.0.0",
-});
+const mcp = new McpServer({ name: "vps-mcp", version: "1.0.0" });
 
-// exec_command tool
 mcp.tool(
   "exec_command",
   "Execute a shell command on the VPS. Returns stdout and stderr.",
@@ -158,15 +144,11 @@ mcp.tool(
       const msg = err.stdout
         ? err.stdout + (err.stderr ? `\n[stderr]\n${err.stderr}` : "")
         : err.message;
-      return {
-        content: [{ type: "text", text: `[error]\n${msg}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text", text: `[error]\n${msg}` }], isError: true };
     }
   }
 );
 
-// read_file tool
 mcp.tool(
   "read_file",
   "Read a file from the VPS filesystem.",
@@ -176,15 +158,11 @@ mcp.tool(
       const content = await fs.readFile(filePath, "utf8");
       return { content: [{ type: "text", text: content }] };
     } catch (err) {
-      return {
-        content: [{ type: "text", text: `[error] ${err.message}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
     }
   }
 );
 
-// write_file tool
 mcp.tool(
   "write_file",
   "Write content to a file on the VPS filesystem.",
@@ -198,10 +176,7 @@ mcp.tool(
       await fs.writeFile(filePath, content, "utf8");
       return { content: [{ type: "text", text: "ok" }] };
     } catch (err) {
-      return {
-        content: [{ type: "text", text: `[error] ${err.message}` }],
-        isError: true,
-      };
+      return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
     }
   }
 );
@@ -210,18 +185,20 @@ mcp.tool(
 
 const transports = new Map();
 
-app.get("/sse", requireBearer, async (req, res) => {
+app.get("/sse", auth, async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   transports.set(transport.sessionId, transport);
-  res.on("close", () => transports.delete(transport.sessionId));
+  req.on("close", () => {
+    transports.delete(transport.sessionId);
+    transport.close();
+  });
   await mcp.connect(transport);
 });
 
-app.post("/messages", requireBearer, async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports.get(sessionId);
+app.post("/messages", auth, async (req, res) => {
+  const transport = transports.get(req.query.sessionId);
   if (!transport) return res.status(404).json({ error: "session not found" });
-  await transport.handlePostMessage(req, res);
+  await transport.handlePostMessage(req, res, req.body);
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
