@@ -66,22 +66,17 @@ make 203.0.113.1__example.com.setupdone
 ```
 
 This:
-1. Sets hostname to `ns1.example.com`
-2. Writes `/etc/vps-mcp/host.env` (`DOMAIN`, `IP`)
-3. Installs BIND9, writes a wildcard zone for `example.com`, starts `named`
-4. Builds the container image (`vps-mcp:latest`)
-5. Builds and installs the Go proxy binaries:
-
-   | Binary | Path |
-   |---|---|
-   | `list-containers` | `/usr/local/bin/list-containers` (setuid root) |
-   | `vps-proxy` | `/usr/local/sbin/vps-proxy` |
-   | `vps-proxy-http` | `/usr/local/sbin/vps-proxy-http` |
-
-6. Installs proxy systemd units, enables + starts them
-7. Installs nftables rules (restricts outbound to root only), applies immediately
+1. Applies all pending OS updates (`dnf upgrade` / `apt upgrade`) so a fresh VPS starts current
+2. Sets hostname to `ns1.example.com` and writes `/etc/vps-mcp/host.env` (`DOMAIN`, `IP`)
+3. Installs BIND9, writes a wildcard zone for `example.com` (with DKIM/SPF/DMARC records), starts `named`
+4. Configures DKIM signing (`opendkim`) and a relay-only `postfix` so containers can send mail
+5. Builds the container image (`vps-mcp:latest`) and the Go proxy binaries (`list-containers`, `vps-proxy`, `vps-proxy-http` in `/usr/local/sbin`)
+6. Installs the proxy socket/service units (`vps-proxy{80,443}`) and nftables rules, then enables + starts them
+7. Enables unattended security updates (`dnf-automatic` / `unattended-upgrades`) and a weekly reboot (`vps-mcp-reboot.timer`, Sunday ~04:00); `podman-restart.service` brings `--restart=always` containers back up after each reboot
 
 After setup, the domain and IP are read from `/etc/vps-mcp/host.env` automatically — no need to pass `DOMAIN=` for subsequent commands.
+
+> **Long-lived containers**: seminar containers run for weeks, so they receive Debian security updates automatically via `unattended-upgrades`. They are not rebooted individually — the host's weekly reboot plus `--restart=always` refreshes them.
 
 > **DNS delegation**: point your registrar's NS records for `example.com` to this server's IP before running setup, or update them afterwards.
 

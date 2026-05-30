@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly automatic reboot timer for the VPS seminar host
+Documentation=https://github.com/paijp/vps-subdomain-mcp
+
+[Timer]
+# Reboot once a week, early Sunday morning, with a randomized delay so a
+# fleet of hosts does not reboot at the exact same instant.
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=600
+Persistent=false
+
+[Install]
+WantedBy=timers.target

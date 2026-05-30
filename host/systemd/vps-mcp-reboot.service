@@ -1,0 +1,7 @@
+[Unit]
+Description=Weekly automatic reboot for the VPS seminar host
+Documentation=https://github.com/paijp/vps-subdomain-mcp
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot

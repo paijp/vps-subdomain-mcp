@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl ca-certificates \
     postfix s-nail \
     curl gnupg \
+    unattended-upgrades \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Node.js 20 (GPG-verified NodeSource repository) ──────────────────────────
@@ -22,14 +23,21 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Disable unwanted units ────────────────────────────────────────────────────
+# apt-daily{,-upgrade}.timer are intentionally NOT masked: they drive
+# unattended-upgrades so the long-lived container receives security updates.
 RUN systemctl mask \
     getty@tty1.service \
     console-getty.service \
     systemd-logind.service \
-    apt-daily.timer \
-    apt-daily-upgrade.timer \
     motd-news.timer \
     e2scrub_reap.service
+
+# ── Automatic security updates ────────────────────────────────────────────────
+# unattended-upgrades applies Debian security updates; the apt-daily timers
+# (above) trigger it. The container itself never reboots — the host's weekly
+# vps-mcp-reboot.timer plus --restart=always refreshes running containers.
+RUN printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+        > /etc/apt/apt.conf.d/20auto-upgrades
 
 # ── Self-signed certificate (replaced by certbot on first boot) ───────────────
 RUN mkdir -p /etc/nginx/ssl \
@@ -71,7 +79,8 @@ RUN chmod +x /usr/local/bin/vps-mcp-init.sh \
 RUN systemctl enable \
     nginx \
     postfix \
-    certbot.timer
+    certbot.timer \
+    unattended-upgrades.service
 
 # ── certbot deploy hook ───────────────────────────────────────────────────────
 RUN mkdir -p /etc/letsencrypt/renewal-hooks/deploy \

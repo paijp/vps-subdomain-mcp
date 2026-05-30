@@ -54,12 +54,15 @@ help:
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
 	if command -v apt-get >/dev/null 2>&1; then \
-	    apt-get install -y bind9 podman golang-go postfix opendkim opendkim-tools; \
+	    apt-get update; \
+	    apt-get upgrade -y; \
+	    apt-get install -y bind9 podman golang-go postfix opendkim opendkim-tools unattended-upgrades; \
 	    BIND_ZONE_DIR=/etc/bind/zones; \
 	    BIND_CONF=/etc/bind/named.conf.local; \
 	elif command -v dnf >/dev/null 2>&1; then \
 	    dnf install -y epel-release || dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$$(rpm -E %rhel).noarch.rpm"; \
-	    dnf install -y bind bind-utils podman golang postfix opendkim opendkim-tools; \
+	    dnf upgrade -y; \
+	    dnf install -y bind bind-utils podman golang postfix opendkim opendkim-tools dnf-automatic; \
 	    BIND_ZONE_DIR=/var/named; \
 	    mkdir -p /etc/named; \
 	    BIND_CONF=/etc/named/named.conf.local; \
@@ -101,6 +104,19 @@ help:
 	systemctl enable --now postfix
 	podman network create --subnet 10.89.0.0/24 --disable-dns vpsmcp-net 2>/dev/null || true
 	systemctl enable --now podman.socket
+	systemctl enable podman-restart.service
+	if command -v apt-get >/dev/null 2>&1; then \
+	    printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+	        > /etc/apt/apt.conf.d/20auto-upgrades; \
+	    systemctl enable --now unattended-upgrades; \
+	elif command -v dnf >/dev/null 2>&1; then \
+	    install -m 644 host/dnf/automatic.conf /etc/dnf/automatic.conf; \
+	    systemctl enable --now dnf-automatic.timer; \
+	fi
+	install -m 644 host/systemd/vps-mcp-reboot.service /etc/systemd/system/
+	install -m 644 host/systemd/vps-mcp-reboot.timer   /etc/systemd/system/
+	systemctl daemon-reload
+	systemctl enable --now vps-mcp-reboot.timer
 	$(MAKE) image
 	$(MAKE) install-binaries
 	$(MAKE) install-services DOMAIN=$(_DOMAIN) IP=$(_IP)
@@ -161,6 +177,7 @@ install-services:
 	    --hostname $(_SUBDOMAIN) \
 	    --network  vpsmcp-net \
 	    --systemd  always \
+	    --restart  always \
 	    --memory   1g \
 	    --pids-limit 200 \
 	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
