@@ -5,28 +5,25 @@ After=vps-proxy80.socket
 
 [Service]
 Type=simple
-User=proxy80
 EnvironmentFile=/etc/vps-mcp/host.env
-ExecStart=/usr/local/sbin/vps-proxy-http -domain ${DOMAIN}
+ExecStart=/bin/sh -c '/usr/local/sbin/list-containers --loop 5 | setpriv --no-new-privs --reuid=proxy80 --regid=proxy80 --init-groups -- /usr/local/sbin/vps-proxy-http -domain ${DOMAIN}'
 Restart=on-failure
 RestartSec=5
 
-CapabilityBoundingSet=
-AmbientCapabilities=
-NoNewPrivileges=true
-
+# Network restriction applies to all child processes in the cgroup.
 IPAddressDeny=any
 IPAddressAllow=10.89.0.0/24
 IPAddressAllow=127.0.0.0/8
 
+# Filesystem protection.
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
 
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-MemoryDenyWriteExecute=true
-SystemCallFilter=@system-service
+# Note: NoNewPrivileges is NOT set at systemd level because it would propagate
+# to list-containers (which needs root to reach the Podman socket).
+# setpriv --no-new-privs applies NNP only to vps-proxy-http.
 
 [Install]
 WantedBy=multi-user.target

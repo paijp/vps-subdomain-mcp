@@ -1,20 +1,19 @@
-// list-containers: setuid-root helper that queries the Podman REST API and
-// prints each container's name, IP address, and state to stdout (tab-separated).
+// list-containers: queries the Podman REST API and prints each container's
+// name, IP address, and state to stdout (tab-separated).
 //
-// Build (static binary, no CGO):
-//   CGO_ENABLED=0 go build -o list-containers ./cmd/list-containers
-//   chown root:root list-containers && chmod 4755 list-containers
+// In one-shot mode (default): prints once and exits.
+// In loop mode (--loop N):    prints every N seconds, with a "---" separator
+//                              after each batch; runs until killed.
 //
-// Install to: /usr/local/bin/list-containers
-//
-// No arguments consumed, no stdin read, no environment variables used.
-// Only issues GET requests to the Podman API; never writes.
-
+// Install to: /usr/local/sbin/list-containers  (root-owned, mode 0755)
+// Run directly as root or via the pipe in vps-proxy*.service.
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -39,34 +38,30 @@ type container struct {
 	} `json:"NetworkSettings"`
 }
 
-func fatal(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "list-containers: "+format+"\n", a...)
-	os.Exit(1)
+var client = &http.Client{
+	Timeout: timeout,
+	Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: timeout}).DialContext(ctx, "unix", podmanSock)
+		},
+	},
 }
 
-func main() {
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{Timeout: timeout}).DialContext(ctx, "unix", podmanSock)
-			},
-		},
-	}
-
+// emit writes the current container list to out.  In loop mode the caller
+// appends the "---" separator and flushes.
+func emit(out *bufio.Writer) error {
 	resp, err := client.Get("http://d/containers/json")
 	if err != nil {
-		fatal("%v", err)
+		return err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		fatal("HTTP %d", resp.StatusCode)
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	var containers []container
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponse)).Decode(&containers); err != nil {
-		fatal("parse: %v", err)
+		return fmt.Errorf("parse: %v", err)
 	}
 
 	for _, c := range containers {
@@ -77,7 +72,6 @@ func main() {
 				name = name[1:]
 			}
 		}
-
 		ip := ""
 		for _, n := range c.NetworkSettings.Networks {
 			if n.IPAddress != "" {
@@ -85,7 +79,40 @@ func main() {
 				break
 			}
 		}
+		fmt.Fprintf(out, "%s\t%s\t%s\n", name, ip, c.State)
+	}
+	return nil
+}
 
-		fmt.Printf("%s\t%s\t%s\n", name, ip, c.State)
+func main() {
+	loop := flag.Int("loop", 0, "seconds between updates (0=one-shot)")
+	flag.Parse()
+
+	out := bufio.NewWriter(os.Stdout)
+
+	if *loop == 0 {
+		if err := emit(out); err != nil {
+			fmt.Fprintf(os.Stderr, "list-containers: %v\n", err)
+			os.Exit(1)
+		}
+		out.Flush()
+		return
+	}
+
+	// Loop mode: emit entries then "---" separator on each tick.
+	tick := func() {
+		if err := emit(out); err != nil {
+			fmt.Fprintf(os.Stderr, "list-containers: %v\n", err)
+			return
+		}
+		fmt.Fprintln(out, "---")
+		out.Flush()
+	}
+
+	tick() // first run immediately
+	ticker := time.NewTicker(time.Duration(*loop) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		tick()
 	}
 }

@@ -21,7 +21,9 @@ func Listeners() ([]net.Listener, error) {
 	}
 
 	pid, err := strconv.Atoi(pidStr)
-	if err != nil || pid != os.Getpid() {
+	// In the pipe architecture (list-containers | setpriv ... vps-proxy),
+	// LISTEN_PID is the shell's PID, not vps-proxy's.  Accept the parent PID.
+	if err != nil || (pid != os.Getpid() && pid != os.Getppid()) {
 		return nil, nil
 	}
 

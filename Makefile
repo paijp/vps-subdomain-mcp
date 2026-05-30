@@ -110,9 +110,9 @@ image:
 # ── install-binaries ──────────────────────────────────────────────────────────
 
 install-binaries:
-	cd proxy && go build -o /usr/local/bin/list-containers  ./cmd/list-containers
-	chown root:root /usr/local/bin/list-containers
-	chmod 4755      /usr/local/bin/list-containers
+	cd proxy && go build -o /usr/local/sbin/list-containers ./cmd/list-containers
+	chown root:root /usr/local/sbin/list-containers
+	chmod 0755      /usr/local/sbin/list-containers
 	cd proxy && go build -o /usr/local/sbin/vps-proxy       ./cmd/vps-proxy
 	cd proxy && go build -o /usr/local/sbin/vps-proxy-http  ./cmd/vps-proxy-http
 
@@ -123,19 +123,13 @@ install-services:
 	    { echo "Error: DOMAIN is required.  Example: make install-services DOMAIN=example.com"; exit 1; }
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(DOMAIN)" "$(IP)" > /etc/vps-mcp/host.env
-	groupadd -r proxies 2>/dev/null || true
-	useradd -r -s /sbin/nologin -G proxies proxy443 2>/dev/null || true
-	useradd -r -s /sbin/nologin -G proxies proxy80  2>/dev/null || true
-	usermod -aG proxies proxy443 2>/dev/null || true
-	usermod -aG proxies proxy80  2>/dev/null || true
-	mkdir -p /etc/systemd/system/podman.socket.d
-	printf '[Socket]\nSocketGroup=proxies\nSocketMode=0660\n' > /etc/systemd/system/podman.socket.d/group.conf
+	useradd -r -s /sbin/nologin proxy443 2>/dev/null || true
+	useradd -r -s /sbin/nologin proxy80  2>/dev/null || true
 	install -m 644 host/systemd/vps-proxy443.socket  /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy443.service /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy80.socket   /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy80.service  /etc/systemd/system/
 	systemctl daemon-reload
-	systemctl restart podman.socket 2>/dev/null || true
 	systemctl enable --now vps-proxy443.socket vps-proxy80.socket
 	mkdir -p /etc/nftables.d; \
 	UID443=$$(id -u proxy443); UID80=$$(id -u proxy80); \

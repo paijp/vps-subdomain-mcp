@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -23,8 +24,7 @@ import (
 )
 
 func main() {
-	domain  := flag.String("domain", "", "base domain, e.g. example.com (required)")
-	listBin := flag.String("list-containers", "/usr/local/bin/list-containers", "path to list-containers binary")
+	domain := flag.String("domain", "", "base domain, e.g. example.com (required)")
 	flag.Parse()
 
 	if *domain == "" {
@@ -32,7 +32,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	table := routes.New(*listBin)
+	table := routes.New(os.Stdin)
+	go table.Run(context.Background())
 
 	ls, err := activation.Listeners()
 	if err != nil {

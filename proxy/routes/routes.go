@@ -1,80 +1,77 @@
 // Package routes maintains a live container-name → IP routing table
-// by periodically running the list-containers binary.
+// by reading tab-separated entries from an io.Reader (typically stdin).
 package routes
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"io"
 	"log"
-	"os/exec"
 	"strings"
 	"sync"
-	"time"
 )
 
-const (
-	refreshInterval = 5 * time.Second
-	execTimeout     = 5 * time.Second
-)
+type entry struct {
+	name string
+	ip   string
+}
 
 // Table holds a live mapping of container name → IP address.
 type Table struct {
-	mu  sync.RWMutex
-	ips map[string]string
-	bin string
+	mu     sync.RWMutex
+	byName map[string]string
+	reader io.Reader
 }
 
-// New creates a Table and starts a background goroutine that refreshes
-// the routing table every 5 seconds by running bin (list-containers).
-// The first refresh runs synchronously before New returns.
-func New(bin string) *Table {
-	t := &Table{bin: bin, ips: make(map[string]string)}
-	if err := t.update(); err != nil {
-		log.Printf("routes: initial update: %v", err)
+// New creates a Table that reads container updates from r.
+// Call Run(ctx) in a goroutine to start consuming the reader.
+func New(r io.Reader) *Table {
+	return &Table{
+		reader: r,
+		byName: make(map[string]string),
 	}
-	go t.loop()
-	return t
 }
 
 // LookupIP returns the IP for a running container, or ("", false) if unknown.
 func (t *Table) LookupIP(containerName string) (string, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	ip, ok := t.ips[containerName]
+	ip, ok := t.byName[containerName]
 	return ip, ok
 }
 
-func (t *Table) loop() {
-	ticker := time.NewTicker(refreshInterval)
-	defer ticker.Stop()
-	for range ticker.C {
-		if err := t.update(); err != nil {
-			log.Printf("routes: %v", err)
+// Run reads tab-separated container entries from the reader until it is closed
+// or ctx is cancelled.  A "---" line triggers an atomic batch update of the
+// routing table.  On pipe close, the last known routes are retained.
+func (t *Table) Run(ctx context.Context) {
+	scanner := bufio.NewScanner(t.reader)
+	var batch []entry
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		line := scanner.Text()
+		if line == "---" {
+			t.apply(batch)
+			batch = nil
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+			batch = append(batch, entry{name: parts[0], ip: parts[1]})
 		}
 	}
+	log.Println("routes: stdin closed, keeping last known routes")
 }
 
-func (t *Table) update() error {
-	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, t.bin).Output()
-	if err != nil {
-		return err
+func (t *Table) apply(batch []entry) {
+	m := make(map[string]string, len(batch))
+	for _, e := range batch {
+		m[e.name] = e.ip
 	}
-
-	m := make(map[string]string)
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	for scanner.Scan() {
-		fields := strings.SplitN(scanner.Text(), "\t", 3)
-		if len(fields) >= 2 && fields[0] != "" && fields[1] != "" {
-			m[fields[0]] = fields[1]
-		}
-	}
-
 	t.mu.Lock()
-	t.ips = m
+	t.byName = m
 	t.mu.Unlock()
-	return nil
 }
