@@ -95,6 +95,8 @@ help:
 	systemctl enable --now opendkim; \
 	postconf -e "inet_interfaces = all"; \
 	postconf -e "inet_protocols = ipv4"; \
+	postconf -e "myhostname = ns1.$(_DOMAIN)"; \
+	postconf -e "myorigin = $(_DOMAIN)"; \
 	postconf -e "mynetworks = 127.0.0.0/8 10.89.0.0/24"; \
 	postconf -e "smtpd_relay_restrictions = permit_mynetworks reject_unauth_destination"; \
 	postconf -e "smtpd_milters = inet:127.0.0.1:8891"; \
@@ -152,9 +154,10 @@ install-services:
 	systemctl daemon-reload
 	systemctl enable --now vps-proxy443.socket vps-proxy80.socket
 	mkdir -p /etc/nftables.d; \
-	UID443=$$(id -u proxy443); UID80=$$(id -u proxy80); \
+	UID443=$$(id -u proxy443); UID80=$$(id -u proxy80); UID_POSTFIX=$$(id -u postfix); \
 	sed -e "s|__UID_PROXY443__|$$UID443|g" \
 	    -e "s|__UID_PROXY80__|$$UID80|g" \
+	    -e "s|__UID_POSTFIX__|$$UID_POSTFIX|g" \
 	    host/nftables/vps-mcp.nft.tmpl > /etc/nftables.d/vps-mcp.nft
 	grep -qF 'include "/etc/nftables.d/*.nft"' /etc/nftables.conf 2>/dev/null || \
 	    printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf

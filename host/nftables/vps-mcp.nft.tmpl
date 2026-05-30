@@ -3,6 +3,10 @@
 # Prevents compromised non-root, non-proxy user accounts from making new
 # outbound connections.  UIDs are substituted at install time by
 # "make install-services" using id(1).
+#
+# Flush the table first so re-applying this file is idempotent.
+table inet vps-mcp {}
+delete table inet vps-mcp
 
 table inet vps-mcp {
     chain output {
@@ -18,6 +22,9 @@ table inet vps-mcp {
         # (systemd IPAddressDeny in the service units blocks external outbound.)
         meta skuid __UID_PROXY443__ ip daddr 10.89.0.0/24 accept
         meta skuid __UID_PROXY80__  ip daddr 10.89.0.0/24 accept
+
+        # Postfix mail relay: unrestricted outbound for DNS lookups and SMTP delivery.
+        meta skuid __UID_POSTFIX__ accept
 
         # Allow responses to connections already established by allowed users.
         ct state established,related accept
