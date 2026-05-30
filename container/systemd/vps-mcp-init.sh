@@ -61,7 +61,6 @@ else
     CERTBOT_EMAIL_FLAGS="--register-unsafely-without-email"
 fi
 certbot certonly \
-    --staging \
     --webroot --webroot-path /var/www/html \
     --non-interactive --agree-tos \
     ${CERTBOT_EMAIL_FLAGS} \
