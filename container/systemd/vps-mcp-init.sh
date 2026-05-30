@@ -19,6 +19,15 @@ if [[ -z "$SUBDOMAIN" ]]; then
     echo "vps-mcp-init: SUBDOMAIN not set" >&2; exit 1
 fi
 
+# ── 0. Wait for systemd to be ready ──────────────────────────────────────────
+echo "vps-mcp-init: waiting for systemd..."
+for i in $(seq 60); do
+    state=$(systemctl is-system-running 2>/dev/null || true)
+    if [[ "$state" == "running" || "$state" == "degraded" ]]; then break; fi
+    sleep 1
+done
+echo "vps-mcp-init: systemd ready (state=${state:-unknown})"
+
 # ── 1. /etc/vps-mcp-env ──────────────────────────────────────────────────────
 cat > /etc/vps-mcp-env <<EOF
 SUBDOMAIN=${SUBDOMAIN}
