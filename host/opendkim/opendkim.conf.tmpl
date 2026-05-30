@@ -7,3 +7,8 @@ KeyFile         /etc/opendkim/keys/__DOMAIN__/mail.private
 Selector        mail
 Socket          inet:8891@127.0.0.1
 UserID          opendkim
+
+# Sign mail relayed from the container subnet, not just localhost.
+# Without this, container mail is treated as "external" and left unsigned
+# (it still passes SPF, but DKIM signing makes delivery more robust).
+InternalHosts   127.0.0.1, ::1, 10.89.0.0/24
