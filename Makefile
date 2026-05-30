@@ -50,7 +50,7 @@ help:
 	$(eval _DOMAIN := $(call domain_of,$*))
 	@test -n "$(_IP)"     || { echo "Error: format is  IP__DOMAIN.setupdone  e.g. 203.0.113.1__example.com.setupdone"; exit 1; }
 	@test -n "$(_DOMAIN)" || { echo "Error: format is  IP__DOMAIN.setupdone  e.g. 203.0.113.1__example.com.setupdone"; exit 1; }
-	hostnamectl set-hostname ns1.$(_DOMAIN)
+	hostnamectl set-hostname $(_DOMAIN)
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
 	if command -v apt-get >/dev/null 2>&1; then \
@@ -88,14 +88,14 @@ help:
 	fi; \
 	if command -v apt-get >/dev/null 2>&1; then _ZF=/etc/bind/zones/$(_DOMAIN).zone; else _ZF=/var/named/$(_DOMAIN).zone; fi; \
 	grep -qF 'mail._domainkey' $$_ZF || cat /etc/opendkim/keys/$(_DOMAIN)/mail.txt >> $$_ZF; \
-	grep -qF 'v=spf1'          $$_ZF || printf '@   IN TXT "v=spf1 a mx ip4:$(_IP) ~all"\n'                                  >> $$_ZF; \
+	grep -qF 'v=spf1'          $$_ZF || printf '@   IN TXT "v=spf1 a mx ip4:$(_IP) ~all"\n*   IN TXT "v=spf1 a mx ip4:$(_IP) ~all"\n' >> $$_ZF; \
 	grep -qF 'v=DMARC1'        $$_ZF || printf '_dmarc  IN TXT "v=DMARC1; p=none; rua=mailto:postmaster@$(_DOMAIN)"\n'      >> $$_ZF; \
 	rndc reload 2>/dev/null || true; \
 	sed 's|__DOMAIN__|$(_DOMAIN)|g' host/opendkim/opendkim.conf.tmpl > /etc/opendkim.conf; \
 	systemctl enable --now opendkim; \
 	postconf -e "inet_interfaces = all"; \
 	postconf -e "inet_protocols = ipv4"; \
-	postconf -e "myhostname = ns1.$(_DOMAIN)"; \
+	postconf -e "myhostname = $(_DOMAIN)"; \
 	postconf -e "myorigin = $(_DOMAIN)"; \
 	postconf -e "mynetworks = 127.0.0.0/8 10.89.0.0/24"; \
 	postconf -e "smtpd_relay_restrictions = permit_mynetworks reject_unauth_destination"; \

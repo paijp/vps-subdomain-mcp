@@ -12,3 +12,7 @@ $TTL 300
 ns1 IN A    __IP__
 @   IN A    __IP__
 *   IN A    __IP__
+
+@   IN TXT  "v=spf1 a mx ip4:__IP__ ~all"
+*   IN TXT  "v=spf1 a mx ip4:__IP__ ~all"
+_dmarc  IN TXT  "v=DMARC1; p=none; rua=mailto:postmaster@__DOMAIN__"

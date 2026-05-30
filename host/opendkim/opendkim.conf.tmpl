@@ -12,3 +12,7 @@ UserID          opendkim
 # Without this, container mail is treated as "external" and left unsigned
 # (it still passes SPF, but DKIM signing makes delivery more robust).
 InternalHosts   127.0.0.1, ::1, 10.89.0.0/24
+
+# Sign mail for subdomains (e.g. alice.example.com) with the parent domain key.
+# DMARC relaxed alignment accepts d=example.com for From: @alice.example.com.
+SubDomains      yes
