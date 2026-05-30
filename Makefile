@@ -59,7 +59,7 @@ help:
 	    BIND_CONF=/etc/bind/named.conf.local; \
 	elif command -v dnf >/dev/null 2>&1; then \
 	    dnf install -y epel-release || dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$$(rpm -E %rhel).noarch.rpm"; \
-	    dnf install -y bind bind-utils podman golang postfix opendkim; \
+	    dnf install -y bind bind-utils podman golang postfix opendkim opendkim-tools; \
 	    BIND_ZONE_DIR=/var/named; \
 	    mkdir -p /etc/named; \
 	    BIND_CONF=/etc/named/named.conf.local; \
