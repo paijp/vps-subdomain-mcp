@@ -90,8 +90,12 @@ func handle(conn net.Conn, domain string, table *routes.Table) {
 	}
 
 	ip, ok := table.LookupIP(containerName)
+	if !ok && containerName != "default-web" {
+		containerName = "default-web"
+		ip, ok = table.LookupIP("default-web")
+	}
 	if !ok {
-		log.Printf("no route: %s → %s", hostname, containerName)
+		log.Printf("no route: %s (no container, no default-web)", hostname)
 		return
 	}
 

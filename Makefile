@@ -28,8 +28,9 @@ help:
 	@printf "  make install-binaries     Build and install Go proxy binaries\n"
 	@printf "  make install-services     (Re)install socket units and nftables\n\n"
 	@printf "Container management:\n"
-	@printf "  make alice__alice@ex.com.done   Create VPS for alice\n"
-	@printf "  make list                       List running VPS containers\n\n"
+	@printf "  make alice__alice@ex.com.done      Create VPS for alice\n"
+	@printf "  make default__admin@ex.com.done    Create default container (serves parent domain)\n"
+	@printf "  make list                          List running VPS containers\n\n"
 	@printf "Variables:\n"
 	@printf "  IMAGE   Container image tag (default: vps-mcp:latest)\n"
 
@@ -53,11 +54,11 @@ help:
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
 	if command -v apt-get >/dev/null 2>&1; then \
-	    apt-get install -y bind9; \
+	    apt-get install -y bind9 podman golang-go; \
 	    BIND_ZONE_DIR=/etc/bind/zones; \
 	    BIND_CONF=/etc/bind/named.conf.local; \
 	elif command -v dnf >/dev/null 2>&1; then \
-	    dnf install -y bind bind-utils; \
+	    dnf install -y bind bind-utils podman golang; \
 	    BIND_ZONE_DIR=/var/named; \
 	    mkdir -p /etc/named; \
 	    BIND_CONF=/etc/named/named.conf.local; \
@@ -122,22 +123,26 @@ install-services:
 
 # ── container creation ────────────────────────────────────────────────────────
 # Usage: make alice__alice@gmail.com.done
+#        make default__admin@gmail.com.done   (serves parent domain, not default.DOMAIN)
 # DOMAIN is read automatically from /etc/vps-mcp/host.env after setupdone.
 
 %.done:
+	$(eval _SUB      := $(call sub_of,$*))
+	$(eval _EMAIL    := $(call email_of,$*))
+	$(eval _SUBDOMAIN := $(if $(filter default,$(_SUB)),$(DOMAIN),$(_SUB).$(DOMAIN)))
 	@test -n "$(DOMAIN)" || \
 	    { echo "Error: DOMAIN not set.  Run make IP__DOMAIN.setupdone first."; exit 1; }
 	podman run -d \
-	    --name     $(call sub_of,$*)-web \
-	    --hostname $(call sub_of,$*).$(DOMAIN) \
+	    --name     $(_SUB)-web \
+	    --hostname $(_SUBDOMAIN) \
 	    --network  vpsmcp-net \
 	    --systemd  always \
 	    --memory   1g \
 	    --pids-limit 200 \
-	    --env      SUBDOMAIN=$(call sub_of,$*).$(DOMAIN) \
-	    --env      NOTIFY_EMAIL=$(call email_of,$*) \
+	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
+	    --env      NOTIFY_EMAIL=$(_EMAIL) \
 	    $(IMAGE)
-	podman exec $(call sub_of,$*)-web /usr/local/bin/vps-mcp-init.sh
+	podman exec $(_SUB)-web /usr/local/bin/vps-mcp-init.sh
 	@touch $@
 
 # ── list ──────────────────────────────────────────────────────────────────────
