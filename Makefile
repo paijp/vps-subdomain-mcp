@@ -63,8 +63,7 @@ help:
 	    BIND_ZONE_DIR=/var/named; \
 	    mkdir -p /etc/named; \
 	    BIND_CONF=/etc/named/named.conf.local; \
-	    grep -qF 'include "/etc/named/named.conf.local"' /etc/named.conf || \
-	        printf '\ninclude "/etc/named/named.conf.local";\n' >> /etc/named.conf; \
+	    install -m 644 host/bind/named.conf.tmpl /etc/named.conf; \
 	else echo "Error: no supported package manager (apt-get or dnf)"; exit 1; fi; \
 	mkdir -p $$BIND_ZONE_DIR; \
 	sed -e 's|__IP__|$(_IP)|g' \
@@ -73,7 +72,9 @@ help:
 	    host/bind/zone.tmpl > $$BIND_ZONE_DIR/$(_DOMAIN).zone; \
 	sed -e 's|__DOMAIN__|$(_DOMAIN)|g' \
 	    -e "s|__BIND_ZONE_DIR__|$$BIND_ZONE_DIR|g" \
-	    host/bind/named.conf.local.tmpl > $$BIND_CONF
+	    host/bind/named.conf.local.tmpl > $$BIND_CONF; \
+	chgrp named $$BIND_ZONE_DIR/$(_DOMAIN).zone $$BIND_CONF 2>/dev/null || true; \
+	chmod 640 $$BIND_ZONE_DIR/$(_DOMAIN).zone $$BIND_CONF 2>/dev/null || true
 	systemctl enable --now named
 	rndc reload 2>/dev/null || true
 	rndc notify 2>/dev/null || true
