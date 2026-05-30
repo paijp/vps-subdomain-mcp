@@ -115,7 +115,7 @@ rm -f alice__alice@gmail.com.done
 
 ## MCP connector setup
 
-MCPコネクタの設定方法については [paijp/vps-mcp](https://github.com/paijp/vps-mcp) のREADMEを参照してください。
+See the [paijp/vps-mcp](https://github.com/paijp/vps-mcp) README for how to configure the MCP connector.
 
 ## Security notes
 

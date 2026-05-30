@@ -53,6 +53,13 @@ help:
 	hostnamectl set-hostname $(_DOMAIN)
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
+	if [ ! -e /swapfile ]; then \
+	    fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024; \
+	    chmod 600 /swapfile; \
+	    mkswap /swapfile; \
+	    swapon /swapfile; \
+	    grep -qF '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab; \
+	fi
 	if command -v apt-get >/dev/null 2>&1; then \
 	    apt-get update; \
 	    apt-get upgrade -y; \
