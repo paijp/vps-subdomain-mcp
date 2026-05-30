@@ -54,11 +54,11 @@ help:
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
 	if command -v apt-get >/dev/null 2>&1; then \
-	    apt-get install -y bind9 podman golang-go; \
+	    apt-get install -y bind9 podman golang-go postfix opendkim opendkim-tools; \
 	    BIND_ZONE_DIR=/etc/bind/zones; \
 	    BIND_CONF=/etc/bind/named.conf.local; \
 	elif command -v dnf >/dev/null 2>&1; then \
-	    dnf install -y bind bind-utils podman golang; \
+	    dnf install -y bind bind-utils podman golang postfix opendkim; \
 	    BIND_ZONE_DIR=/var/named; \
 	    mkdir -p /etc/named; \
 	    BIND_CONF=/etc/named/named.conf.local; \
@@ -76,6 +76,25 @@ help:
 	systemctl enable --now named
 	rndc reload 2>/dev/null || true
 	rndc notify 2>/dev/null || true
+	mkdir -p /etc/opendkim/keys/$(_DOMAIN); \
+	if [ ! -f /etc/opendkim/keys/$(_DOMAIN)/mail.private ]; then \
+	    opendkim-genkey -b 2048 -D /etc/opendkim/keys/$(_DOMAIN)/ -d $(_DOMAIN) -s mail; \
+	    chown -R opendkim:opendkim /etc/opendkim/keys; \
+	fi; \
+	if command -v apt-get >/dev/null 2>&1; then _ZF=/etc/bind/zones/$(_DOMAIN).zone; else _ZF=/var/named/$(_DOMAIN).zone; fi; \
+	grep -qF 'mail._domainkey' $$_ZF || cat /etc/opendkim/keys/$(_DOMAIN)/mail.txt >> $$_ZF; \
+	grep -qF 'v=spf1'          $$_ZF || printf '@   IN TXT "v=spf1 a mx ip4:$(_IP) ~all"\n'                                  >> $$_ZF; \
+	grep -qF 'v=DMARC1'        $$_ZF || printf '_dmarc  IN TXT "v=DMARC1; p=none; rua=mailto:postmaster@$(_DOMAIN)"\n'      >> $$_ZF; \
+	rndc reload 2>/dev/null || true; \
+	sed 's|__DOMAIN__|$(_DOMAIN)|g' host/opendkim/opendkim.conf.tmpl > /etc/opendkim.conf; \
+	systemctl enable --now opendkim; \
+	postconf -e "inet_interfaces = 10.89.0.1, loopback-only"; \
+	postconf -e "mynetworks = 127.0.0.0/8 10.89.0.0/24"; \
+	postconf -e "smtpd_milters = inet:127.0.0.1:8891"; \
+	postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"; \
+	postconf -e "milter_protocol = 6"; \
+	postconf -e "milter_default_action = accept"; \
+	systemctl enable --now postfix
 	podman network create --subnet 10.89.0.0/24 --disable-dns vpsmcp-net 2>/dev/null || true
 	systemctl enable --now podman.socket
 	$(MAKE) image
@@ -104,13 +123,19 @@ install-services:
 	    { echo "Error: DOMAIN is required.  Example: make install-services DOMAIN=example.com"; exit 1; }
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(DOMAIN)" "$(IP)" > /etc/vps-mcp/host.env
-	useradd -r -s /sbin/nologin proxy443 2>/dev/null || true
-	useradd -r -s /sbin/nologin proxy80  2>/dev/null || true
+	groupadd -r proxies 2>/dev/null || true
+	useradd -r -s /sbin/nologin -G proxies proxy443 2>/dev/null || true
+	useradd -r -s /sbin/nologin -G proxies proxy80  2>/dev/null || true
+	usermod -aG proxies proxy443 2>/dev/null || true
+	usermod -aG proxies proxy80  2>/dev/null || true
+	mkdir -p /etc/systemd/system/podman.socket.d
+	printf '[Socket]\nSocketGroup=proxies\nSocketMode=0660\n' > /etc/systemd/system/podman.socket.d/group.conf
 	install -m 644 host/systemd/vps-proxy443.socket  /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy443.service /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy80.socket   /etc/systemd/system/
 	install -m 644 host/systemd/vps-proxy80.service  /etc/systemd/system/
 	systemctl daemon-reload
+	systemctl restart podman.socket 2>/dev/null || true
 	systemctl enable --now vps-proxy443.socket vps-proxy80.socket
 	mkdir -p /etc/nftables.d; \
 	UID443=$$(id -u proxy443); UID80=$$(id -u proxy80); \

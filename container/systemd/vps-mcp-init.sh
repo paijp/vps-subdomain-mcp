@@ -45,6 +45,8 @@ echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
 postconf -e "myhostname = ${SUBDOMAIN}"
+postconf -e "relayhost = [10.89.0.1]:25"
+postconf -e "smtp_tls_security_level = none"
 systemctl reload-or-restart postfix
 
 # ── 4. nginx: replace server_name placeholder ────────────────────────────────

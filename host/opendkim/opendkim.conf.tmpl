@@ -1,0 +1,9 @@
+# opendkim.conf — DKIM signing relay for vps-subdomain-mcp containers
+Mode            s
+Syslog          yes
+SyslogSuccess   yes
+Domain          __DOMAIN__
+KeyFile         /etc/opendkim/keys/__DOMAIN__/mail.private
+Selector        mail
+Socket          inet:8891@127.0.0.1
+UserID          opendkim
