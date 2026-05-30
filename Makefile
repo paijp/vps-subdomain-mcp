@@ -77,6 +77,7 @@ help:
 	rndc reload 2>/dev/null || true
 	rndc notify 2>/dev/null || true
 	podman network create --subnet 10.89.0.0/24 --disable-dns vpsmcp-net 2>/dev/null || true
+	systemctl enable --now podman.socket
 	$(MAKE) image
 	$(MAKE) install-binaries
 	$(MAKE) install-services DOMAIN=$(_DOMAIN) IP=$(_IP)
