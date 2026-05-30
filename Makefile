@@ -90,8 +90,10 @@ help:
 	rndc reload 2>/dev/null || true; \
 	sed 's|__DOMAIN__|$(_DOMAIN)|g' host/opendkim/opendkim.conf.tmpl > /etc/opendkim.conf; \
 	systemctl enable --now opendkim; \
-	postconf -e "inet_interfaces = 10.89.0.1, loopback-only"; \
+	postconf -e "inet_interfaces = all"; \
+	postconf -e "inet_protocols = ipv4"; \
 	postconf -e "mynetworks = 127.0.0.0/8 10.89.0.0/24"; \
+	postconf -e "smtpd_relay_restrictions = permit_mynetworks reject_unauth_destination"; \
 	postconf -e "smtpd_milters = inet:127.0.0.1:8891"; \
 	postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"; \
 	postconf -e "milter_protocol = 6"; \
