@@ -108,12 +108,13 @@ app.post("/mcp/token", (req, res) => {
   try { unlinkSync(TFN); } catch {}
 
   if (NOTIFY_EMAIL) {
-    const m = spawn("/usr/bin/s-nail", [
-      "-s", `MCP token issued client_id=${cid}`,
-      "-r", `noreply@${SUBDOMAIN}`,
+    const m = spawn("/usr/sbin/sendmail", [
+      "-f", `noreply@${SUBDOMAIN}`,
       NOTIFY_EMAIL,
     ]);
-    m.stdin.end("done");
+    m.stdin.end(
+      `From: noreply@${SUBDOMAIN}\r\nTo: ${NOTIFY_EMAIL}\r\nSubject: MCP token issued client_id=${cid}\r\n\r\ndone\r\n`
+    );
   }
 
   setTimeout(() => res.json({ access_token: token, token_type: "Bearer" }), 5000);

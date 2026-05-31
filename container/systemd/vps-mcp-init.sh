@@ -46,6 +46,7 @@ echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
 postconf -e "myhostname = ${SUBDOMAIN}"
+postconf -e "myorigin = ${SUBDOMAIN}"
 postconf -e "relayhost = [10.89.0.1]:25"
 postconf -e "smtp_tls_security_level = none"
 systemctl reload-or-restart postfix
@@ -85,10 +86,13 @@ systemctl enable --now mcp-server
 # Sends a test email to NOTIFY_EMAIL so the operator can confirm the mail
 # path (container → host relay → external) before the token-issuance mail.
 if [[ -n "${NOTIFY_EMAIL}" ]]; then
-    echo "Container ready. MCP SSE endpoint: https://${SUBDOMAIN}/mcp/sse" \
-        | s-nail -s "created: ${SUBDOMAIN}" \
-                 -r "noreply@${SUBDOMAIN}" \
-                 "${NOTIFY_EMAIL}"
+    /usr/sbin/sendmail -f "noreply@${SUBDOMAIN}" "${NOTIFY_EMAIL}" <<EOF
+From: noreply@${SUBDOMAIN}
+To: ${NOTIFY_EMAIL}
+Subject: created: ${SUBDOMAIN}
+
+Container ready. MCP SSE endpoint: https://${SUBDOMAIN}/mcp/sse
+EOF
 fi
 
 echo "vps-mcp-init: done (${SUBDOMAIN})"
