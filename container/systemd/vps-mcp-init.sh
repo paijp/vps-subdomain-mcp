@@ -45,7 +45,11 @@ chmod 600 /etc/mcp-server/secret /etc/mcp-server/token
 echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
-postconf -e "myhostname = ${SUBDOMAIN}"
+# myhostname is deliberately prefixed with "mail." so it never equals the host
+# relay's hostname. The default container's SUBDOMAIN is the bare domain
+# (== the host's hostname); without the prefix, Postfix sees the relay greet
+# with its own name and bounces every message as "loops back to myself".
+postconf -e "myhostname = mail.${SUBDOMAIN}"
 postconf -e "myorigin = ${SUBDOMAIN}"
 postconf -e "relayhost = [10.89.0.1]:25"
 postconf -e "smtp_tls_security_level = none"
