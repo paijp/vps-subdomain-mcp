@@ -195,6 +195,8 @@ install-services:
 	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
 	    --env      NOTIFY_EMAIL=$(_EMAIL) \
 	    $(IMAGE)
+	@echo "Letting the proxy refresh its routing table for the new container..."
+	@sleep 10
 	@echo "Waiting for the proxy to route the HTTP-01 path to $(_SUBDOMAIN)..."
 	@for i in $$(seq 60); do \
 	    code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
