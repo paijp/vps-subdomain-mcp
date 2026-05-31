@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // Package sni extracts the SNI hostname from a TLS ClientHello record.
 package sni
 

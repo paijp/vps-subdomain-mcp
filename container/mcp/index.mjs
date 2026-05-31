@@ -1,4 +1,6 @@
 /**
+ * https://github.com/paijp/vps-subdomain-mcp
+ *
  * vps-mcp: MCP server for VPS seminar containers.
  *
  * OAuth 2.1 flow (same design as paijp/vps-mcp):

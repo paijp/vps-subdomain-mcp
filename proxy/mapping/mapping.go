@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // Package mapping converts hostnames to Podman container names.
 package mapping
 

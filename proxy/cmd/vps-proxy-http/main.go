@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // vps-proxy-http: TCP passthrough proxy for port 80.
 // Reads the first HTTP request bytes, extracts the Host header,
 // and TCP-proxies the connection to the matching container without

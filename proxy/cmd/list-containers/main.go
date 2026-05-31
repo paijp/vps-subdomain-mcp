@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // list-containers: queries the Podman REST API and prints each container's
 // name, IP address, and state to stdout (tab-separated).
 //

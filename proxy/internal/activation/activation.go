@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // Package activation implements systemd socket activation (sd_listen_fds).
 // Uses only the standard library; no external dependencies.
 package activation

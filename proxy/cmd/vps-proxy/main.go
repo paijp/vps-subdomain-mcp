@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // vps-proxy: TLS SNI passthrough proxy for port 443.
 // Reads the TLS ClientHello, extracts the SNI hostname, and TCP-proxies
 // the connection to the matching container without decrypting the traffic.

@@ -1,5 +1,6 @@
 [Unit]
 Description=VPS TLS SNI Passthrough Proxy socket (port 443)
+Documentation=https://github.com/paijp/vps-subdomain-mcp
 
 [Socket]
 ListenStream=443

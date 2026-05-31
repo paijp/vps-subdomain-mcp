@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 // Package routes maintains a live container-name → IP routing table
 // by reading tab-separated entries from an io.Reader (typically stdin).
 package routes

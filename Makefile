@@ -1,3 +1,5 @@
+# https://github.com/paijp/vps-subdomain-mcp
+
 IMAGE ?= vps-mcp:latest
 
 # After %.setupdone runs, DOMAIN and IP are stored in /etc/vps-mcp/host.env.
@@ -37,7 +39,7 @@ help:
 # ── host setup ────────────────────────────────────────────────────────────────
 # Usage: make 203.0.113.1__example.com.setupdone
 #
-# 1. Set hostname to ns1.<domain>
+# 1. Set hostname to <domain>
 # 2. Write /etc/vps-mcp/host.env  (DOMAIN, IP)
 # 3. Install BIND9, configure wildcard zone with secondary NS, reload
 # 4. Create vpsmcp-net Podman network (10.89.0.0/24, DNS disabled)
@@ -193,6 +195,16 @@ install-services:
 	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
 	    --env      NOTIFY_EMAIL=$(_EMAIL) \
 	    $(IMAGE)
+	@echo "Waiting for the proxy to route the HTTP-01 path to $(_SUBDOMAIN)..."
+	@for i in $$(seq 60); do \
+	    code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+	        --resolve $(_SUBDOMAIN):80:$(IP) \
+	        http://$(_SUBDOMAIN)/.well-known/acme-challenge/ping 2>/dev/null || true); \
+	    if [ "$$code" = "404" ] || [ "$$code" = "200" ]; then \
+	        echo "proxy ready (HTTP $$code) after $$i attempt(s)"; break; \
+	    fi; \
+	    sleep 2; \
+	done
 	podman exec $(_SUB)-web /usr/local/bin/vps-mcp-init.sh
 	@touch $@
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# https://github.com/paijp/vps-subdomain-mcp
 # certbot-deploy.sh: deploy hook called by certbot after successful renewal.
 # Updates the nginx config cert paths and reloads nginx.
 set -euo pipefail

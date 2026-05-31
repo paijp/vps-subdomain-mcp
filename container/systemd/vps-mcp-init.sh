@@ -1,4 +1,5 @@
 #!/bin/bash
+# https://github.com/paijp/vps-subdomain-mcp
 # vps-mcp-init.sh: first-boot initialisation for a VPS seminar container.
 # Run once via: podman exec <name>-web /usr/local/bin/vps-mcp-init.sh
 #

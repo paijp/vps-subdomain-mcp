@@ -1,3 +1,5 @@
+// https://github.com/paijp/vps-subdomain-mcp
+
 package mapping_test
 
 import (
