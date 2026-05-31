@@ -33,6 +33,7 @@ import { z } from "zod";
 const execFileAsync = promisify(execFile);
 
 const SUBDOMAIN    = process.env.SUBDOMAIN    || "localhost";
+const MAIL_DOMAIN  = process.env.MAIL_DOMAIN  || SUBDOMAIN;
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || "";
 const PORT         = 3000;
 const EXEC_TIMEOUT = 60_000;
@@ -109,11 +110,11 @@ app.post("/mcp/token", (req, res) => {
 
   if (NOTIFY_EMAIL) {
     const m = spawn("/usr/sbin/sendmail", [
-      "-f", `noreply@${SUBDOMAIN}`,
+      "-f", `noreply@${MAIL_DOMAIN}`,
       NOTIFY_EMAIL,
     ]);
     m.stdin.end(
-      `From: noreply@${SUBDOMAIN}\r\nTo: ${NOTIFY_EMAIL}\r\nSubject: MCP token issued client_id=${cid}\r\n\r\ndone\r\n`
+      `From: noreply@${MAIL_DOMAIN}\r\nTo: ${NOTIFY_EMAIL}\r\nSubject: MCP token issued client_id=${cid}\r\n\r\ndone\r\n`
     );
   }
 

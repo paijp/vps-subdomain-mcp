@@ -193,6 +193,7 @@ install-services:
 	    --memory   1g \
 	    --pids-limit 200 \
 	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
+	    --env      MAIL_DOMAIN=$(_SUB).$(DOMAIN) \
 	    --env      NOTIFY_EMAIL=$(_EMAIL) \
 	    $(IMAGE)
 	@echo "Letting the proxy refresh its routing table for the new container..."

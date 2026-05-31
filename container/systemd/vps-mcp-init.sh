@@ -15,6 +15,11 @@ set -euo pipefail
 
 SUBDOMAIN="${SUBDOMAIN:-}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
+# MAIL_DOMAIN is the sender domain for all outgoing mail.
+# For the default container SUBDOMAIN equals the bare domain, so we use
+# default.DOMAIN to distinguish it from the host relay's hostname.
+# For regular subdomains MAIL_DOMAIN equals SUBDOMAIN (passed from Makefile).
+MAIL_DOMAIN="${MAIL_DOMAIN:-$SUBDOMAIN}"
 
 if [[ -z "$SUBDOMAIN" ]]; then
     echo "vps-mcp-init: SUBDOMAIN not set" >&2; exit 1
@@ -32,6 +37,7 @@ echo "vps-mcp-init: systemd ready (state=${state:-unknown})"
 # ── 1. /etc/vps-mcp-env ──────────────────────────────────────────────────────
 cat > /etc/vps-mcp-env <<EOF
 SUBDOMAIN=${SUBDOMAIN}
+MAIL_DOMAIN=${MAIL_DOMAIN}
 NOTIFY_EMAIL=${NOTIFY_EMAIL}
 EOF
 chmod 640 /etc/vps-mcp-env
@@ -45,12 +51,11 @@ chmod 600 /etc/mcp-server/secret /etc/mcp-server/token
 echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
-# myhostname is deliberately prefixed with "mail." so it never equals the host
-# relay's hostname. The default container's SUBDOMAIN is the bare domain
-# (== the host's hostname); without the prefix, Postfix sees the relay greet
-# with its own name and bounces every message as "loops back to myself".
-postconf -e "myhostname = mail.${SUBDOMAIN}"
-postconf -e "myorigin = ${SUBDOMAIN}"
+# MAIL_DOMAIN is always distinct from the host relay's hostname (kimoken.jp),
+# so Postfix will not mistake the relay for itself and bounce with "loops back
+# to myself". For default: MAIL_DOMAIN=default.DOMAIN; others: MAIL_DOMAIN=SUBDOMAIN.
+postconf -e "myhostname = ${MAIL_DOMAIN}"
+postconf -e "myorigin = ${MAIL_DOMAIN}"
 postconf -e "relayhost = [10.89.0.1]:25"
 postconf -e "smtp_tls_security_level = none"
 systemctl reload-or-restart postfix
@@ -90,8 +95,8 @@ systemctl enable --now mcp-server
 # Sends a test email to NOTIFY_EMAIL so the operator can confirm the mail
 # path (container → host relay → external) before the token-issuance mail.
 if [[ -n "${NOTIFY_EMAIL}" ]]; then
-    /usr/sbin/sendmail -f "noreply@${SUBDOMAIN}" "${NOTIFY_EMAIL}" <<EOF
-From: noreply@${SUBDOMAIN}
+    /usr/sbin/sendmail -f "noreply@${MAIL_DOMAIN}" "${NOTIFY_EMAIL}" <<EOF
+From: noreply@${MAIL_DOMAIN}
 To: ${NOTIFY_EMAIL}
 Subject: created: ${SUBDOMAIN}
 
