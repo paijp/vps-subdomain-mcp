@@ -137,62 +137,69 @@ function auth(req, res, next) {
 }
 
 // ── MCP server ────────────────────────────────────────────────────────────────
+// A fresh McpServer is built per SSE connection: a single Protocol instance can
+// only be bound to one transport at a time, so sharing it across reconnects
+// throws "Already connected to a transport" and crashes the process.
 
-const mcp = new McpServer({ name: "vps-mcp", version: "1.0.0" });
+function createMcpServer() {
+  const mcp = new McpServer({ name: "vps-mcp", version: "1.0.0" });
 
-mcp.tool(
-  "exec_command",
-  "Execute a shell command on the VPS. Returns stdout and stderr.",
-  { command: z.string().describe("Shell command to run") },
-  async ({ command }) => {
-    try {
-      const { stdout, stderr } = await execFileAsync(
-        "/bin/bash", ["-c", command],
-        { timeout: EXEC_TIMEOUT, maxBuffer: 10 * 1024 * 1024 }
-      );
-      return {
-        content: [{ type: "text", text: stdout + (stderr ? `\n[stderr]\n${stderr}` : "") }],
-      };
-    } catch (err) {
-      const msg = err.stdout
-        ? err.stdout + (err.stderr ? `\n[stderr]\n${err.stderr}` : "")
-        : err.message;
-      return { content: [{ type: "text", text: `[error]\n${msg}` }], isError: true };
+  mcp.tool(
+    "exec_command",
+    "Execute a shell command on the VPS. Returns stdout and stderr.",
+    { command: z.string().describe("Shell command to run") },
+    async ({ command }) => {
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          "/bin/bash", ["-c", command],
+          { timeout: EXEC_TIMEOUT, maxBuffer: 10 * 1024 * 1024 }
+        );
+        return {
+          content: [{ type: "text", text: stdout + (stderr ? `\n[stderr]\n${stderr}` : "") }],
+        };
+      } catch (err) {
+        const msg = err.stdout
+          ? err.stdout + (err.stderr ? `\n[stderr]\n${err.stderr}` : "")
+          : err.message;
+        return { content: [{ type: "text", text: `[error]\n${msg}` }], isError: true };
+      }
     }
-  }
-);
+  );
 
-mcp.tool(
-  "read_file",
-  "Read a file from the VPS filesystem.",
-  { path: z.string().describe("Absolute path to the file") },
-  async ({ path: filePath }) => {
-    try {
-      const content = await fs.readFile(filePath, "utf8");
-      return { content: [{ type: "text", text: content }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
+  mcp.tool(
+    "read_file",
+    "Read a file from the VPS filesystem.",
+    { path: z.string().describe("Absolute path to the file") },
+    async ({ path: filePath }) => {
+      try {
+        const content = await fs.readFile(filePath, "utf8");
+        return { content: [{ type: "text", text: content }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
+      }
     }
-  }
-);
+  );
 
-mcp.tool(
-  "write_file",
-  "Write content to a file on the VPS filesystem.",
-  {
-    path:    z.string().describe("Absolute path to the file"),
-    content: z.string().describe("Content to write"),
-  },
-  async ({ path: filePath, content }) => {
-    try {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, content, "utf8");
-      return { content: [{ type: "text", text: "ok" }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
+  mcp.tool(
+    "write_file",
+    "Write content to a file on the VPS filesystem.",
+    {
+      path:    z.string().describe("Absolute path to the file"),
+      content: z.string().describe("Content to write"),
+    },
+    async ({ path: filePath, content }) => {
+      try {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, content, "utf8");
+        return { content: [{ type: "text", text: "ok" }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `[error] ${err.message}` }], isError: true };
+      }
     }
-  }
-);
+  );
+
+  return mcp;
+}
 
 // ── SSE transport ─────────────────────────────────────────────────────────────
 
@@ -205,6 +212,7 @@ app.get("/mcp/sse", auth, async (req, res) => {
     transports.delete(transport.sessionId);
     transport.close();
   });
+  const mcp = createMcpServer();
   await mcp.connect(transport);
 });
 
