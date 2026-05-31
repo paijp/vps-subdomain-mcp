@@ -1,16 +1,53 @@
 # https://github.com/paijp/vps-subdomain-mcp
 
-# vps-mcp.nft — host OUTPUT restriction
+# vps-mcp.nft — host INPUT allow-list + OUTPUT restriction
 #
-# Prevents compromised non-root, non-proxy user accounts from making new
-# outbound connections.  UIDs are substituted at install time by
-# "make install-services" using id(1).
+# input chain (policy drop):
+#   Permits only the services the host must expose — SSH (22), HTTP/HTTPS
+#   (80/443), authoritative DNS (53), plus ICMP and established traffic.
+#   SMTP (25) is restricted to the container subnet (relay only); everything
+#   else is dropped.  The podman-generated "netavark" INPUT chain keeps
+#   policy accept, but an nftables drop is terminal across base chains, so
+#   this default-drop chain tightens ingress regardless.
+#
+# output chain (policy accept):
+#   Prevents compromised non-root, non-proxy user accounts from making new
+#   outbound connections.  UIDs are substituted at install time by
+#   "make install-services" using id(1).
 #
 # Flush the table first so re-applying this file is idempotent.
 table inet vps-mcp {}
 delete table inet vps-mcp
 
 table inet vps-mcp {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        # Loopback always allowed.
+        iif lo accept
+
+        # Allow responses to connections the host established; drop bogus.
+        ct state established,related accept
+        ct state invalid drop
+
+        # ICMP: IPv4 (ping, PMTU) and IPv6 ND/ICMPv6 (required for IPv6).
+        meta l4proto icmp accept
+        meta l4proto ipv6-icmp accept
+
+        # SSH (management) — open to all sources.
+        tcp dport 22 accept
+
+        # HTTP / HTTPS (public, served by the proxies).
+        tcp dport { 80, 443 } accept
+
+        # Authoritative DNS (public).
+        tcp dport 53 accept
+        udp dport 53 accept
+
+        # SMTP relay — container subnet only (containers relay outbound mail).
+        ip saddr 10.89.0.0/24 tcp dport 25 accept
+    }
+
     chain output {
         type filter hook output priority filter; policy accept;
 

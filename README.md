@@ -47,7 +47,7 @@ host/
   bind/named.conf.local.tmpl      BIND local config template
   systemd/vps-proxy.service       proxy unit (reads DOMAIN from /etc/vps-mcp/host.env)
   systemd/vps-proxy-http.service
-  nftables/vps-mcp.nft            OUTPUT restriction for non-root users
+  nftables/vps-mcp.nft            INPUT allow-list + OUTPUT restriction
 Makefile
 ```
 
@@ -146,7 +146,8 @@ The `client_secret` and the raw token are each consumed on first use; only a SHA
 - The `/mcp/token` endpoint is restricted to Anthropic's IP range (`160.79.104.0/21`) at the nginx layer so only Claude.ai can obtain tokens.
 - The `client_secret` file is deleted after first use; only a SHA-256 hash of the issued token is retained on disk.
 - The MCP server listens on `127.0.0.1:3000` only.
-- `vps-mcp.nft` blocks new outbound connections from non-root host users; established/related traffic is always allowed.
+- `vps-mcp.nft` runs a default-drop INPUT filter that exposes only SSH (22), HTTP/HTTPS (80/443), and DNS (53) publicly; SMTP (25) is reachable from the container subnet only.
+- `vps-mcp.nft` also blocks new outbound connections from non-root host users; established/related traffic is always allowed.
 
 ## License
 
