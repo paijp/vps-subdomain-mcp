@@ -38,7 +38,7 @@ chmod 640 /etc/vps-mcp-env
 # ── 2. MCP credentials ───────────────────────────────────────────────────────
 mkdir -p /etc/mcp-server
 chmod 700 /etc/mcp-server
-openssl rand -hex 32 > /etc/mcp-server/secret
+openssl rand -hex 8 > /etc/mcp-server/secret
 openssl rand -hex 32 > /etc/mcp-server/token
 chmod 600 /etc/mcp-server/secret /etc/mcp-server/token
 echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
