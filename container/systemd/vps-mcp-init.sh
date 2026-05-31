@@ -81,4 +81,14 @@ nginx -t && systemctl reload nginx
 # ── 7. mcp-server ────────────────────────────────────────────────────────────
 systemctl enable --now mcp-server
 
+# ── 8. Creation notification ─────────────────────────────────────────────────
+# Sends a test email to NOTIFY_EMAIL so the operator can confirm the mail
+# path (container → host relay → external) before the token-issuance mail.
+if [[ -n "${NOTIFY_EMAIL}" ]]; then
+    echo "Container ready. MCP SSE endpoint: https://${SUBDOMAIN}/mcp/sse" \
+        | mail -s "created: ${SUBDOMAIN}" \
+               -r "noreply@${SUBDOMAIN}" \
+               "${NOTIFY_EMAIL}"
+fi
+
 echo "vps-mcp-init: done (${SUBDOMAIN})"
