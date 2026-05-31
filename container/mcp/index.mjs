@@ -3,11 +3,16 @@
  *
  * vps-mcp: MCP server for VPS seminar containers.
  *
- * OAuth 2.1 flow (same design as paijp/vps-mcp):
- *   - /authorize  validates redirect_uri host is claude.ai, issues a dummy code
- *   - /token      validates client_secret against /etc/mcp-server/secret (single-use),
- *                 issues the pre-generated token from /etc/mcp-server/token (single-use),
- *                 stores sha256(token) in /etc/mcp-server/hash for future auth
+ * All MCP/OAuth endpoints are namespaced under /mcp/ to avoid clashing with
+ * static content; only the RFC 8414 discovery document stays at the
+ * well-known root.
+ *   - /.well-known/oauth-authorization-server  discovery metadata
+ *   - /mcp/authorize  validates redirect_uri host is claude.ai, issues a dummy code
+ *   - /mcp/token      validates client_secret against /etc/mcp-server/secret (single-use),
+ *                     issues the pre-generated token from /etc/mcp-server/token (single-use),
+ *                     stores sha256(token) in /etc/mcp-server/hash for future auth
+ *   - /mcp/sse        SSE transport (Bearer auth)
+ *   - /mcp/messages   SSE message channel (Bearer auth)
  *
  * Environment variables (set by vps-mcp-init.service):
  *   SUBDOMAIN     – full hostname, e.g. alice.example.com
@@ -50,8 +55,8 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base  = `${proto}://${host}`;
   res.json({
     issuer:                                base,
-    authorization_endpoint:               `${base}/authorize`,
-    token_endpoint:                        `${base}/token`,
+    authorization_endpoint:               `${base}/mcp/authorize`,
+    token_endpoint:                        `${base}/mcp/token`,
     token_endpoint_auth_methods_supported: ["client_secret_post"],
     response_types_supported:             ["code"],
     code_challenge_methods_supported:     ["S256"],
@@ -61,7 +66,7 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
 // ── Authorization endpoint ────────────────────────────────────────────────────
 // Validates that redirect_uri belongs to claude.ai, then issues a dummy code.
 
-app.get("/authorize", (req, res) => {
+app.get("/mcp/authorize", (req, res) => {
   const { redirect_uri, state } = req.query;
   try {
     if (new URL(redirect_uri).hostname !== "claude.ai") return res.status(400).send();
@@ -79,7 +84,7 @@ app.get("/authorize", (req, res) => {
 // Issues the pre-generated token from /etc/mcp-server/token (single-use).
 // Restricted to Anthropic IPs (160.79.104.0/21) by nginx.
 
-app.post("/token", (req, res) => {
+app.post("/mcp/token", (req, res) => {
   const { client_secret } = req.body;
 
   let secret;
@@ -187,8 +192,8 @@ mcp.tool(
 
 const transports = new Map();
 
-app.get("/sse", auth, async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
+app.get("/mcp/sse", auth, async (req, res) => {
+  const transport = new SSEServerTransport("/mcp/messages", res);
   transports.set(transport.sessionId, transport);
   req.on("close", () => {
     transports.delete(transport.sessionId);
@@ -197,7 +202,7 @@ app.get("/sse", auth, async (req, res) => {
   await mcp.connect(transport);
 });
 
-app.post("/messages", auth, async (req, res) => {
+app.post("/mcp/messages", auth, async (req, res) => {
   const transport = transports.get(req.query.sessionId);
   if (!transport) return res.status(404).json({ error: "session not found" });
   await transport.handlePostMessage(req, res, req.body);
