@@ -198,6 +198,39 @@ function createMcpServer() {
     }
   );
 
+  mcp.tool(
+    "nginx_reload",
+    "Reload the nginx configuration. Always use this instead of running " +
+      "'nginx -s reload' / 'systemctl reload nginx' via exec_command: the MCP " +
+      "SSE connection is proxied through nginx, so a synchronous reload can " +
+      "interrupt it before the tool result is delivered and stall the client " +
+      "until timeout. This validates the config, returns immediately, then " +
+      "defers the actual reload so the result is flushed first.",
+    {},
+    async () => {
+      // Validate the config before touching the running server. nginx -t
+      // writes its report to stderr on both success and failure.
+      let report;
+      try {
+        const { stderr } = await execFileAsync("/usr/sbin/nginx", ["-t"]);
+        report = stderr;
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `[error] nginx config test failed:\n${err.stderr || err.message}` }],
+          isError: true,
+        };
+      }
+      // Defer the reload so this response reaches the client first; reloading
+      // can briefly disrupt the SSE connection that carries tool results.
+      setTimeout(() => {
+        execFile("/usr/bin/systemctl", ["reload", "nginx"], (err, _out, stderr) => {
+          if (err) console.error(`nginx_reload: reload failed: ${stderr || err.message}`);
+        });
+      }, 1000);
+      return { content: [{ type: "text", text: `nginx config valid; reload scheduled\n${report}` }] };
+    }
+  );
+
   return mcp;
 }
 

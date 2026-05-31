@@ -37,7 +37,7 @@ proxy/
 container/
   Containerfile          debian:bookworm-slim + systemd + nginx + Node.js 20
   nginx/vps-mcp.conf     nginx template (server_name set by init)
-  mcp/index.mjs          MCP server (OAuth 2.1, exec_command, read_file, write_file)
+  mcp/index.mjs          MCP server (OAuth 2.1, exec_command, read_file, write_file, nginx_reload)
   mcp/package.json
   systemd/mcp-server.service
   systemd/vps-mcp-init.sh   first-boot init (run via podman exec)
@@ -134,7 +134,7 @@ After the container is created:
    ```
 3. Claude.ai opens the OAuth authorization page. Enter the `client_secret` printed during container creation.
 4. A token-issuance notification email is sent from `noreply@alice.example.com` to `NOTIFY_EMAIL`.
-5. Claude.ai connects and the three tools become available: `exec_command`, `read_file`, `write_file`.
+5. Claude.ai connects and the tools become available: `exec_command`, `read_file`, `write_file`, and `nginx_reload` (use the latter instead of reloading nginx through `exec_command`, which would interrupt the SSE connection).
 
 The `client_secret` and the raw token are each consumed on first use; only a SHA-256 hash of the token is retained on disk for subsequent Bearer authentication.
 
