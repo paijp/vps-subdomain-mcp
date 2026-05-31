@@ -67,7 +67,7 @@ make 203.0.113.1__example.com.setupdone
 
 This:
 1. Applies all pending OS updates (`dnf upgrade` / `apt upgrade`) so a fresh VPS starts current
-2. Sets hostname to `ns1.example.com` and writes `/etc/vps-mcp/host.env` (`DOMAIN`, `IP`)
+2. Sets hostname to `example.com` and writes `/etc/vps-mcp/host.env` (`DOMAIN`, `IP`)
 3. Installs BIND9, writes a wildcard zone for `example.com` (with DKIM/SPF/DMARC records), starts `named`
 4. Configures DKIM signing (`opendkim`) and a relay-only `postfix` so containers can send mail
 5. Builds the container image (`vps-mcp:latest`) and the Go proxy binaries (`list-containers`, `vps-proxy`, `vps-proxy-http` in `/usr/local/sbin`)
@@ -87,18 +87,28 @@ make alice__alice@gmail.com.done
 ```
 
 This:
-1. Runs `podman run` with `SUBDOMAIN=alice.example.com` and `NOTIFY_EMAIL=alice@gmail.com`
-2. Runs `podman exec alice-web /usr/local/bin/vps-mcp-init.sh`, which:
+1. Runs `podman run` with `SUBDOMAIN=alice.example.com`, `MAIL_DOMAIN=alice.example.com`, and `NOTIFY_EMAIL=alice@gmail.com`
+2. Waits for the proxy to route the HTTP-01 ACME challenge path to the new container
+3. Runs `podman exec alice-web /usr/local/bin/vps-mcp-init.sh`, which:
    - Writes `/etc/vps-mcp-env`
-   - Generates `/etc/mcp-server/secret` (`client_secret`) and `/etc/mcp-server/token`
-   - Configures Postfix `myhostname`
+   - Generates `/etc/mcp-server/secret` (`client_secret`, 16 hex chars) and `/etc/mcp-server/token`
+   - Configures Postfix `myhostname`/`myorigin` to `alice.example.com`
    - Substitutes `server_name` in the nginx config and reloads nginx
    - Obtains a Let's Encrypt certificate via `certbot certonly --webroot`
    - Switches nginx to the live certificate
    - Runs `systemctl enable --now mcp-server`
-3. Creates `alice__alice@gmail.com.done` to record completion
+   - Sends a creation notification email to `NOTIFY_EMAIL` from `noreply@alice.example.com`
+4. Creates `alice__alice@gmail.com.done` to record completion
 
 The `client_secret` is printed to the console during init.
+
+To create a container for the **parent domain** itself (no subdomain prefix):
+
+```sh
+make default__admin@gmail.com.done
+```
+
+This works identically, but `SUBDOMAIN=example.com` and `MAIL_DOMAIN=default.example.com`.
 
 List running containers:
 
@@ -115,13 +125,25 @@ rm -f alice__alice@gmail.com.done
 
 ## MCP connector setup
 
-See the [paijp/vps-mcp](https://github.com/paijp/vps-mcp) README for how to configure the MCP connector.
+After the container is created:
+
+1. The creation notification email arrives at `NOTIFY_EMAIL` (confirms the mail path works).
+2. Add the MCP connector in Claude.ai with the SSE URL:
+   ```
+   https://alice.example.com/mcp/sse
+   ```
+3. Claude.ai opens the OAuth authorization page. Enter the `client_secret` printed during container creation.
+4. A token-issuance notification email is sent from `noreply@alice.example.com` to `NOTIFY_EMAIL`.
+5. Claude.ai connects and the three tools become available: `exec_command`, `read_file`, `write_file`.
+
+The `client_secret` and the raw token are each consumed on first use; only a SHA-256 hash of the token is retained on disk for subsequent Bearer authentication.
 
 ## Security notes
 
 - The SNI proxy never decrypts TLS traffic.
 - The PROXY protocol header is generated from `conn.RemoteAddr()` only; client-supplied PROXY headers are rejected by the SNI check (`0x16` byte).
 - `set_real_ip_from` is scoped to the single gateway IP (`10.89.0.1`), not the whole subnet.
+- The `/mcp/token` endpoint is restricted to Anthropic's IP range (`160.79.104.0/21`) at the nginx layer so only Claude.ai can obtain tokens.
 - The `client_secret` file is deleted after first use; only a SHA-256 hash of the issued token is retained on disk.
 - The MCP server listens on `127.0.0.1:3000` only.
 - `vps-mcp.nft` blocks new outbound connections from non-root host users; established/related traffic is always allowed.
@@ -129,3 +151,7 @@ See the [paijp/vps-mcp](https://github.com/paijp/vps-mcp) README for how to conf
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+*This code and documentation were created with [Claude](https://claude.ai/) (Sonnet 4.6 and Opus 4.8).*
