@@ -86,9 +86,9 @@ systemctl enable --now mcp-server
 # path (container → host relay → external) before the token-issuance mail.
 if [[ -n "${NOTIFY_EMAIL}" ]]; then
     echo "Container ready. MCP SSE endpoint: https://${SUBDOMAIN}/mcp/sse" \
-        | mail -s "created: ${SUBDOMAIN}" \
-               -r "noreply@${SUBDOMAIN}" \
-               "${NOTIFY_EMAIL}"
+        | s-nail -s "created: ${SUBDOMAIN}" \
+                 -r "noreply@${SUBDOMAIN}" \
+                 "${NOTIFY_EMAIL}"
 fi
 
 echo "vps-mcp-init: done (${SUBDOMAIN})"
