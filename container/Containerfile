@@ -5,23 +5,16 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ── Base system ──────────────────────────────────────────────────────────────
+# Node.js 18 from Debian's own repository — no third-party repo needed.
+# Covered by unattended-upgrades (Debian-Security) with no extra config.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     systemd systemd-sysv dbus \
     nginx certbot python3-certbot \
     openssl ca-certificates \
     postfix s-nail \
-    curl gnupg \
+    nodejs npm \
+    curl \
     unattended-upgrades \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── Node.js 20 (GPG-verified NodeSource repository) ──────────────────────────
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-       > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Disable unwanted units ────────────────────────────────────────────────────
@@ -36,8 +29,10 @@ RUN systemctl mask \
 
 # ── Automatic security updates ────────────────────────────────────────────────
 # unattended-upgrades applies Debian security updates; the apt-daily timers
-# (above) trigger it. The container itself never reboots — the host's weekly
-# vps-mcp-reboot.timer plus --restart=always refreshes running containers.
+# (above) trigger it.  Node.js is from the Debian repos and is covered
+# automatically — no extra Origins-Pattern needed.
+# The container itself never reboots — the host's weekly vps-mcp-reboot.timer
+# plus --restart=always refreshes running containers.
 RUN printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
         > /etc/apt/apt.conf.d/20auto-upgrades
 
