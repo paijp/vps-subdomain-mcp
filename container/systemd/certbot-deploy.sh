@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SUBDOMAIN="${RENEWED_DOMAINS%% *}"
-NGINX_CONF=/etc/nginx/sites-available/vps-mcp.conf
+NGINX_CONF=/etc/nginx/conf.d/vps-mcp.conf
 LIVE_DIR="/etc/letsencrypt/live/${SUBDOMAIN}"
 
 sed -i \

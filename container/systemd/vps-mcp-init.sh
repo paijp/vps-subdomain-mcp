@@ -61,7 +61,7 @@ postconf -e "smtp_tls_security_level = none"
 systemctl reload-or-restart postfix
 
 # ── 4. nginx: replace server_name placeholder ────────────────────────────────
-NGINX_CONF=/etc/nginx/sites-available/vps-mcp.conf
+NGINX_CONF=/etc/nginx/conf.d/vps-mcp.conf
 sed -i "s/server_name _;/server_name ${SUBDOMAIN};/g" "${NGINX_CONF}"
 nginx -t && systemctl reload nginx
 

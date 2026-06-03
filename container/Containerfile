@@ -1,40 +1,40 @@
 # https://github.com/paijp/vps-subdomain-mcp
 
-FROM debian:bookworm-slim
+FROM rockylinux:10
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# ── Base system ──────────────────────────────────────────────────────────────
-# Node.js 18 from Debian's own repository — no third-party repo needed.
-# Covered by unattended-upgrades (Debian-Security) with no extra config.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    systemd systemd-sysv dbus \
-    nginx certbot python3-certbot \
-    openssl ca-certificates \
-    postfix s-nail \
-    nodejs npm \
-    curl \
-    unattended-upgrades \
-    && rm -rf /var/lib/apt/lists/*
+# ── Base system ───────────────────────────────────────────────────────────────
+# certbot comes from EPEL; nodejs 22 from AppStream — no third-party repos.
+# Automatic security updates use dnf-automatic-install.timer, covered by
+# Red Hat's security team through the AppStream / BaseOS / EPEL channels.
+RUN dnf install -y epel-release \
+    && dnf install -y \
+        systemd \
+        nginx \
+        certbot \
+        openssl \
+        ca-certificates \
+        postfix \
+        nodejs \
+        npm \
+        curl \
+        dnf-automatic \
+    && dnf clean all
 
 # ── Disable unwanted units ────────────────────────────────────────────────────
-# apt-daily{,-upgrade}.timer are intentionally NOT masked: they drive
-# unattended-upgrades so the long-lived container receives security updates.
+# dnf-automatic-install.timer is intentionally NOT masked: it applies
+# security updates so the long-lived container stays patched.
 RUN systemctl mask \
     getty@tty1.service \
     console-getty.service \
     systemd-logind.service \
-    motd-news.timer \
-    e2scrub_reap.service
+    NetworkManager.service \
+    firewalld.service
 
 # ── Automatic security updates ────────────────────────────────────────────────
-# unattended-upgrades applies Debian security updates; the apt-daily timers
-# (above) trigger it.  Node.js is from the Debian repos and is covered
-# automatically — no extra Origins-Pattern needed.
+# dnf-automatic-install always applies updates (no config needed).
 # The container itself never reboots — the host's weekly vps-mcp-reboot.timer
 # plus --restart=always refreshes running containers.
-RUN printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
-        > /etc/apt/apt.conf.d/20auto-upgrades
+RUN systemctl enable dnf-automatic-install.timer
 
 # ── Self-signed certificate (replaced by certbot on first boot) ───────────────
 RUN mkdir -p /etc/nginx/ssl \
@@ -44,9 +44,10 @@ RUN mkdir -p /etc/nginx/ssl \
        -subj   "/CN=localhost"
 
 # ── nginx configuration ───────────────────────────────────────────────────────
-COPY nginx/vps-mcp.conf /etc/nginx/sites-available/vps-mcp.conf
-RUN rm -f /etc/nginx/sites-enabled/default \
-    && ln -s /etc/nginx/sites-available/vps-mcp.conf /etc/nginx/sites-enabled/vps-mcp.conf
+# Replace the Rocky default nginx.conf (which has a server{} block that
+# conflicts with ours) with a clean version that only includes conf.d/.
+COPY nginx/nginx.conf     /etc/nginx/nginx.conf
+COPY nginx/vps-mcp.conf   /etc/nginx/conf.d/vps-mcp.conf
 
 # ── Postfix nullclient ────────────────────────────────────────────────────────
 # myhostname is set by vps-mcp-init.sh at runtime.
@@ -76,8 +77,7 @@ RUN chmod +x /usr/local/bin/vps-mcp-init.sh \
 RUN systemctl enable \
     nginx \
     postfix \
-    certbot.timer \
-    unattended-upgrades.service
+    certbot-renew.timer
 
 # ── certbot deploy hook ───────────────────────────────────────────────────────
 RUN mkdir -p /etc/letsencrypt/renewal-hooks/deploy \
