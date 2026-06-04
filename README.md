@@ -149,6 +149,7 @@ The `client_secret` and the raw token are each consumed on first use; only a SHA
 - The MCP server listens on `127.0.0.1:3000` only.
 - `vps-mcp.nft` runs a default-drop INPUT filter that exposes only SSH (22), HTTP/HTTPS (80/443), and DNS (53) publicly; SMTP (25) is reachable from the container subnet only.
 - `vps-mcp.nft` also blocks new outbound connections from non-root host users; established/related traffic is always allowed.
+- Host SSH password authentication is disabled (`host/ssh/00-vps-mcp-hardening.conf`): access is key-based, and since containers grant participants root and can reach the host's `:22`, this removes brute-force exposure of host accounts.
 
 ## License
 

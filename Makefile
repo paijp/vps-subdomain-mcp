@@ -124,6 +124,14 @@ help:
 	    install -m 644 host/dnf/automatic.conf /etc/dnf/automatic.conf; \
 	    systemctl enable --now dnf-automatic.timer; \
 	fi
+	# Harden SSH: disable password authentication (access is key-based).
+	# A container compromise gives the participant root inside their container
+	# and reachability to the host's :22, so password login must be off to
+	# remove brute-force exposure. The drop-in's 00- prefix wins first-match;
+	# validate with sshd -t before reloading so a bad config can't lock us out.
+	mkdir -p /etc/ssh/sshd_config.d
+	install -m 600 host/ssh/00-vps-mcp-hardening.conf /etc/ssh/sshd_config.d/00-vps-mcp-hardening.conf
+	sshd -t && { systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true; }
 	install -m 644 host/systemd/vps-mcp-reboot.service /etc/systemd/system/
 	install -m 644 host/systemd/vps-mcp-reboot.timer   /etc/systemd/system/
 	systemctl daemon-reload
