@@ -132,6 +132,17 @@ help:
 	mkdir -p /etc/ssh/sshd_config.d
 	install -m 600 host/ssh/00-vps-mcp-hardening.conf /etc/ssh/sshd_config.d/00-vps-mcp-hardening.conf
 	sshd -t && { systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true; }
+	# Install fail2ban for SSH brute-force protection.
+	# Uses the nftables banaction (firewalld is masked on this host).
+	# The 00-vps-mcp.conf drop-in overrides the distro's 00-firewalld.conf.
+	if command -v apt-get >/dev/null 2>&1; then \
+	    apt-get install -y fail2ban; \
+	elif command -v dnf >/dev/null 2>&1; then \
+	    dnf install -y fail2ban; \
+	fi
+	mkdir -p /etc/fail2ban/jail.d
+	install -m 644 host/fail2ban/jail.d/00-vps-mcp.conf /etc/fail2ban/jail.d/00-vps-mcp.conf
+	systemctl enable --now fail2ban
 	install -m 644 host/systemd/vps-mcp-reboot.service /etc/systemd/system/
 	install -m 644 host/systemd/vps-mcp-reboot.timer   /etc/systemd/system/
 	systemctl daemon-reload
