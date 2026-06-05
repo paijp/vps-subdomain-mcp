@@ -25,6 +25,8 @@ help:
 	@printf "  make 203.0.113.1__example.com.setupdone\n"
 	@printf "      Hostname, BIND wildcard DNS, vpsmcp-net, proxy sockets, nftables.\n"
 	@printf "      After this, DOMAIN is read from /etc/vps-mcp/host.env automatically.\n\n"
+	@printf "Optional hardening:\n"
+	@printf "  make sshsec.done          Disable SSH password auth + install fail2ban\n\n"
 	@printf "Rebuild components individually:\n"
 	@printf "  make image                Build container image\n"
 	@printf "  make install-binaries     Build and install Go proxy binaries\n"
@@ -124,25 +126,6 @@ help:
 	    install -m 644 host/dnf/automatic.conf /etc/dnf/automatic.conf; \
 	    systemctl enable --now dnf-automatic.timer; \
 	fi
-	# Harden SSH: disable password authentication (access is key-based).
-	# A container compromise gives the participant root inside their container
-	# and reachability to the host's :22, so password login must be off to
-	# remove brute-force exposure. The drop-in's 00- prefix wins first-match;
-	# validate with sshd -t before reloading so a bad config can't lock us out.
-	mkdir -p /etc/ssh/sshd_config.d
-	install -m 600 host/ssh/00-vps-mcp-hardening.conf /etc/ssh/sshd_config.d/00-vps-mcp-hardening.conf
-	sshd -t && { systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true; }
-	# Install fail2ban for SSH brute-force protection.
-	# Uses the nftables banaction (firewalld is masked on this host).
-	# The 00-vps-mcp.conf drop-in overrides the distro's 00-firewalld.conf.
-	if command -v apt-get >/dev/null 2>&1; then \
-	    apt-get install -y fail2ban; \
-	elif command -v dnf >/dev/null 2>&1; then \
-	    dnf install -y fail2ban; \
-	fi
-	mkdir -p /etc/fail2ban/jail.d
-	install -m 644 host/fail2ban/jail.d/00-vps-mcp.conf /etc/fail2ban/jail.d/00-vps-mcp.conf
-	systemctl enable --now fail2ban
 	install -m 644 host/systemd/vps-mcp-reboot.service /etc/systemd/system/
 	install -m 644 host/systemd/vps-mcp-reboot.timer   /etc/systemd/system/
 	systemctl daemon-reload
@@ -191,6 +174,36 @@ install-services:
 	    printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf
 	systemctl enable nftables
 	nft -f /etc/nftables.d/vps-mcp.nft
+
+# ── sshsec.done — optional SSH hardening ──────────────────────────────────────
+# Usage: make sshsec.done
+#
+# Not called by setupdone — run it separately when you want to lock down SSH.
+#   1. Disable password authentication (access is key-based).
+#   2. Install + enable fail2ban with the nftables banaction.
+#
+# Explicit target, so it takes precedence over the %.done pattern rule below.
+sshsec.done:
+	# Harden SSH: disable password authentication (access is key-based).
+	# A container compromise gives the participant root inside their container
+	# and reachability to the host's :22, so password login must be off to
+	# remove brute-force exposure. The drop-in's 00- prefix wins first-match;
+	# validate with sshd -t before reloading so a bad config can't lock us out.
+	mkdir -p /etc/ssh/sshd_config.d
+	install -m 600 host/ssh/00-vps-mcp-hardening.conf /etc/ssh/sshd_config.d/00-vps-mcp-hardening.conf
+	sshd -t && { systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true; }
+	# Install fail2ban for SSH brute-force protection.
+	# Uses the nftables banaction (firewalld is masked on this host).
+	# The 00-vps-mcp.conf drop-in overrides the distro's 00-firewalld.conf.
+	if command -v apt-get >/dev/null 2>&1; then \
+	    apt-get install -y fail2ban; \
+	elif command -v dnf >/dev/null 2>&1; then \
+	    dnf install -y fail2ban; \
+	fi
+	mkdir -p /etc/fail2ban/jail.d
+	install -m 644 host/fail2ban/jail.d/00-vps-mcp.conf /etc/fail2ban/jail.d/00-vps-mcp.conf
+	systemctl enable --now fail2ban
+	@touch $@
 
 # ── container creation ────────────────────────────────────────────────────────
 # Usage: make alice__alice@gmail.com.done
