@@ -21,14 +21,14 @@ Internet
 - **BIND9** serves the base domain as a primary authoritative server with a wildcard A record (`*.example.com → server IP`).
 - **vps-proxy** reads the TLS ClientHello SNI, maps `alice.example.com` → container `alice-web`, and TCP-proxies without decryption.  PROXY protocol v1 is injected so nginx sees the real client IP.
 - **vps-proxy-http** reads the HTTP `Host` header and reverse-proxies to the matching container.
-- **list-containers** (setuid-root) queries the Podman socket to build the container→IP routing table used by both proxies.
+- **list-containers** (runs as root via the proxy service) queries the Podman socket to build the container→IP routing table used by both proxies.
 - Each container runs systemd, nginx, Postfix (nullclient), and the MCP server.
 
 ## Directory layout
 
 ```
 proxy/
-  cmd/list-containers/   setuid-root binary — container name/IP discovery
+  cmd/list-containers/   root binary — container name/IP discovery
   cmd/vps-proxy/         TLS SNI passthrough proxy (port 443)
   cmd/vps-proxy-http/    HTTP reverse proxy (port 80)
   mapping/               hostname → container-name mapping
