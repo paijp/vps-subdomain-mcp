@@ -20,10 +20,11 @@
  * Endpoints on the oauth container (enabled when GITHUB_CLIENT_ID is set):
  *   - /mcp/start      validates claude_redirect host, redirects to GitHub authorize
  *   - /mcp/callback   exchanges the GitHub code (single-use, consumed here) for the
- *                     verified primary email, stores { challenge -> email }, then
- *                     redirects the browser back to claude.ai with a dummy code
- *   - /mcp/resolve    given { code_verifier }, looks up the email by
- *                     sha256(verifier) == challenge (self-authenticating via PKCE)
+ *                     verified primary email, mints an authorization code bound to
+ *                     { challenge, email }, then redirects the browser back to
+ *                     claude.ai with that code
+ *   - /mcp/resolve    given { code, code_verifier }, returns the email if the code
+ *                     exists and sha256(verifier) == its stored challenge
  *
  * Environment variables (set by vps-mcp-init.service):
  *   SUBDOMAIN          – full hostname, e.g. alice.example.com
@@ -137,7 +138,7 @@ app.get("/mcp/authorize", (req, res) => {
 // validate the verifier locally: an invalid one simply fails to resolve.
 
 app.post("/mcp/token", async (req, res) => {
-  const code_verifier = req.body.code_verifier;
+  const { code, code_verifier } = req.body;
   if (!OAUTH_BASE) return res.status(500).send();
 
   let email;
@@ -145,7 +146,7 @@ app.post("/mcp/token", async (req, res) => {
     const r = await fetch(`${OAUTH_BASE}/mcp/resolve`, {
       method:  "POST",
       headers: { "content-type": "application/json" },
-      body:    JSON.stringify({ code_verifier }),
+      body:    JSON.stringify({ code, code_verifier }),
     });
     if (!r.ok) return res.status(403).send();
     ({ email } = await r.json());
@@ -171,8 +172,9 @@ app.post("/mcp/token", async (req, res) => {
 });
 
 // ── OAuth-container endpoints (GitHub login broker) ───────────────────────────
-// pending: challenge -> { email, createdAt }. In-memory; a login completes in one
-// short browser session. Entries are single-use and swept after PENDING_TTL.
+// pending: auth_code -> { challenge, email, createdAt }. In-memory; a login
+// completes in one short browser session. Entries are single-use and swept
+// after PENDING_TTL.
 
 const pending = new Map();
 const PENDING_TTL = 10 * 60_000;
@@ -240,27 +242,36 @@ if (IS_OAUTH) {
         : null;
       if (!primary) return res.status(403).send();
 
-      pending.set(st.challenge, { email: primary.email, createdAt: Date.now() });
+      // Issue our own authorization code, bound to the PKCE challenge and email.
+      // It is delivered only to claude.ai (redirect_uri is host-locked above), so
+      // an attacker who merely holds a verifier cannot obtain it and thus cannot
+      // resolve — this is what stops login-CSRF / authorization-code fixation.
+      const authCode = crypto.randomBytes(32).toString("hex");
+      pending.set(authCode, { challenge: st.challenge, email: primary.email, createdAt: Date.now() });
+
+      const url = new URL(st.claude_redirect);
+      url.searchParams.set("code", authCode);
+      if (st.claude_state) url.searchParams.set("state", st.claude_state);
+      res.set("Referrer-Policy", "no-referrer");
+      return res.redirect(302, url.toString());
     } catch {
       return res.status(502).send();
     }
-
-    const url = new URL(st.claude_redirect);
-    url.searchParams.set("code", "x");
-    if (st.claude_state) url.searchParams.set("state", st.claude_state);
-    res.set("Referrer-Policy", "no-referrer");
-    res.redirect(302, url.toString());
   });
 
-  // Self-authenticating: only the client that holds the verifier whose SHA-256
-  // equals a stored challenge can retrieve the email. Single-use.
+  // Resolve the verified email for an authorization code. The caller must present
+  // both the code (delivered only to claude.ai) and the matching PKCE verifier.
+  // Single-use.
   app.post("/mcp/resolve", (req, res) => {
-    const { code_verifier } = req.body;
-    if (!code_verifier) return res.status(400).send();
-    const challenge = sha256b64url(code_verifier);
-    const entry = pending.get(challenge);
+    const { code, code_verifier } = req.body;
+    if (!code || !code_verifier) return res.status(400).send();
+    const entry = pending.get(code);
     if (!entry) return res.status(404).send();
-    pending.delete(challenge);
+    const a = Buffer.from(sha256b64url(code_verifier));
+    const b = Buffer.from(entry.challenge);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b))
+      return res.status(403).send();
+    pending.delete(code);
     res.json({ email: entry.email });
   });
 }
