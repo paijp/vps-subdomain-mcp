@@ -85,9 +85,30 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
     issuer:                                base,
     authorization_endpoint:               `${base}/mcp/authorize`,
     token_endpoint:                        `${base}/mcp/token`,
+    registration_endpoint:                `${base}/mcp/register`,
     token_endpoint_auth_methods_supported: ["none"],
     response_types_supported:             ["code"],
     code_challenge_methods_supported:     ["S256"],
+  });
+});
+
+// ── Dynamic client registration (RFC 7591) ────────────────────────────────────
+// Claude.ai auto-registers a client before starting the flow; without this it
+// reports "does not support automatic client registration". We are a public
+// client and never validate client_id (PKCE + GitHub email match are the gate),
+// so we just mint an id and echo the requested metadata back.
+
+app.post("/mcp/register", (req, res) => {
+  const meta = req.body || {};
+  res.status(201).json({
+    client_id:            crypto.randomBytes(16).toString("hex"),
+    client_id_issued_at:  Math.floor(Date.now() / 1000),
+    redirect_uris:        Array.isArray(meta.redirect_uris) ? meta.redirect_uris : [],
+    token_endpoint_auth_method: "none",
+    grant_types:          meta.grant_types   || ["authorization_code"],
+    response_types:       meta.response_types || ["code"],
+    ...(meta.client_name ? { client_name: meta.client_name } : {}),
+    ...(meta.scope       ? { scope:       meta.scope }       : {}),
   });
 });
 
