@@ -91,8 +91,8 @@ This:
 1. Runs `podman run` with `SUBDOMAIN=alice.example.com`, `MAIL_DOMAIN=alice.example.com`, and `NOTIFY_EMAIL=alice@gmail.com`
 2. Waits for the proxy to route the HTTP-01 ACME challenge path to the new container
 3. Runs `podman exec alice-web /usr/local/bin/vps-mcp-init.sh`, which:
-   - Writes `/etc/vps-mcp-env`
-   - Generates `/etc/mcp-server/secret` (`client_secret`, 16 hex chars) and `/etc/mcp-server/token`
+   - Writes `/etc/vps-mcp-env` (including `OAUTH_BASE=https://oauth.example.com`)
+   - Creates `/etc/mcp-server` (holds the issued token hash at login time)
    - Configures Postfix `myhostname`/`myorigin` to `alice.example.com`
    - Substitutes `server_name` in the nginx config and reloads nginx
    - Obtains a Let's Encrypt certificate via `certbot certonly --webroot`
@@ -101,7 +101,8 @@ This:
    - Sends a creation notification email to `NOTIFY_EMAIL` from `noreply@alice.example.com`
 4. Creates `alice__alice@gmail.com.done` to record completion
 
-The `client_secret` is printed to the console during init.
+Access is granted by **GitHub login**: a user only obtains a Bearer token if they
+log in with a GitHub account whose verified primary email matches `NOTIFY_EMAIL`.
 
 To create a container for the **parent domain** itself (no subdomain prefix):
 
@@ -124,6 +125,26 @@ podman stop alice-web && podman rm alice-web
 rm -f alice__alice@gmail.com.done
 ```
 
+## GitHub login broker (one-time setup)
+
+Authentication uses real GitHub OAuth. Register one GitHub OAuth App and run a
+single dedicated `oauth` container that brokers logins for every other container.
+
+1. Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps → New):
+   - **Homepage URL**: `https://oauth.example.com`
+   - **Authorization callback URL**: `https://oauth.example.com/mcp/callback`
+2. Save its credentials to `/etc/vps-mcp/oauth.env` (mode 600) on the host:
+   ```
+   GITHUB_CLIENT_ID=...
+   GITHUB_CLIENT_SECRET=...
+   ```
+3. Create the broker container (it is the only one holding the GitHub secret):
+   ```sh
+   make oauth__admin@gmail.com.done
+   ```
+
+Every other container learns only `OAUTH_BASE=https://oauth.example.com`.
+
 ## MCP connector setup
 
 After the container is created:
@@ -133,19 +154,26 @@ After the container is created:
    ```
    https://alice.example.com/mcp/sse
    ```
-3. Claude.ai opens the OAuth authorization page. Enter the `client_secret` printed during container creation.
-4. A token-issuance notification email is sent from `noreply@alice.example.com` to `NOTIFY_EMAIL`.
+3. Claude.ai opens the authorization page, which redirects to GitHub. Log in with
+   the GitHub account whose verified primary email is `NOTIFY_EMAIL`.
+4. On a successful email match, a token-issuance notification email is sent from
+   `noreply@alice.example.com` to `NOTIFY_EMAIL`.
 5. Claude.ai connects and the tools become available: `exec_command`, `read_file`, `write_file`, and `nginx_reload` (use the latter instead of reloading nginx through `exec_command`, which would interrupt the SSE connection).
 
-The `client_secret` and the raw token are each consumed on first use; only a SHA-256 hash of the token is retained on disk for subsequent Bearer authentication.
+The login flow is PKCE-protected (S256): the GitHub authorization code is consumed
+immediately at the broker and never reaches Claude.ai; only a SHA-256 hash of the
+issued Bearer token is retained on disk for subsequent authentication.
 
 ## Security notes
 
 - The SNI proxy never decrypts TLS traffic.
 - The PROXY protocol header is generated from `conn.RemoteAddr()` only; client-supplied PROXY headers are rejected by the SNI check (`0x16` byte).
 - `set_real_ip_from` is scoped to the single gateway IP (`10.89.0.1`), not the whole subnet.
-- The `/mcp/token` endpoint is restricted to Anthropic's IP range (`160.79.104.0/21`) at the nginx layer so only Claude.ai can obtain tokens.
-- The `client_secret` file is deleted after first use; only a SHA-256 hash of the issued token is retained on disk.
+- Access requires a GitHub login whose verified primary email matches `NOTIFY_EMAIL`; the email match is enforced per-container, so the allow-list is never centralized.
+- The PKCE verifier is the only key to retrieving the resolved email from the broker (`/mcp/resolve` is self-authenticating: it looks the email up by `SHA256(verifier)`), so it needs no shared secret or IP restriction.
+- The GitHub authorization code is exchanged immediately at the broker and never handed to Claude.ai; the broker holds the GitHub `client_secret` and is the only container that does.
+- The `/mcp/token` endpoint keeps the Anthropic IP allow-list (`160.79.104.0/21`) as defense in depth; the real gate is PKCE plus the GitHub email match.
+- Only a SHA-256 hash of the issued Bearer token is retained on disk.
 - The MCP server listens on `127.0.0.1:3000` only.
 - `vps-mcp.nft` runs a default-drop INPUT filter that exposes only SSH (22), HTTP/HTTPS (80/443), and DNS (53) publicly; SMTP (25) is reachable from the container subnet only.
 - `vps-mcp.nft` also blocks new outbound connections from non-root host users; established/related traffic is always allowed.

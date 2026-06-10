@@ -5,7 +5,7 @@
 #
 # Steps:
 #   1. Write /etc/vps-mcp-env  (for mcp-server.service EnvironmentFile=)
-#   2. Generate /etc/mcp-server/secret and /etc/mcp-server/token
+#   2. Create /etc/mcp-server (holds the issued token hash at runtime)
 #   3. Configure Postfix myhostname
 #   4. Substitute server_name in the nginx config; reload nginx
 #   5. Run certbot certonly --webroot
@@ -20,6 +20,11 @@ NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 # default.DOMAIN to distinguish it from the host relay's hostname.
 # For regular subdomains MAIL_DOMAIN equals SUBDOMAIN (passed from Makefile).
 MAIL_DOMAIN="${MAIL_DOMAIN:-$SUBDOMAIN}"
+# OAUTH_BASE points every container at the GitHub-login broker (oauth.<DOMAIN>).
+# GITHUB_CLIENT_ID/SECRET are set only on the oauth container itself.
+OAUTH_BASE="${OAUTH_BASE:-}"
+GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-}"
+GITHUB_CLIENT_SECRET="${GITHUB_CLIENT_SECRET:-}"
 
 if [[ -z "$SUBDOMAIN" ]]; then
     echo "vps-mcp-init: SUBDOMAIN not set" >&2; exit 1
@@ -39,16 +44,16 @@ cat > /etc/vps-mcp-env <<EOF
 SUBDOMAIN=${SUBDOMAIN}
 MAIL_DOMAIN=${MAIL_DOMAIN}
 NOTIFY_EMAIL=${NOTIFY_EMAIL}
+OAUTH_BASE=${OAUTH_BASE}
+GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
 EOF
 chmod 640 /etc/vps-mcp-env
 
-# ── 2. MCP credentials ───────────────────────────────────────────────────────
+# ── 2. MCP credentials directory ─────────────────────────────────────────────
+# Holds /etc/mcp-server/hash, written when a Bearer token is issued at login.
 mkdir -p /etc/mcp-server
 chmod 700 /etc/mcp-server
-openssl rand -hex 8 > /etc/mcp-server/secret
-openssl rand -hex 32 > /etc/mcp-server/token
-chmod 600 /etc/mcp-server/secret /etc/mcp-server/token
-echo "vps-mcp-init: client_secret=$(cat /etc/mcp-server/secret)"
 
 # ── 3. Postfix ────────────────────────────────────────────────────────────────
 # MAIL_DOMAIN is always distinct from the host relay's hostname (kimoken.jp),

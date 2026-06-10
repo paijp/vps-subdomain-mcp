@@ -32,6 +32,7 @@ help:
 	@printf "  make install-binaries     Build and install Go proxy binaries\n"
 	@printf "  make install-services     (Re)install socket units and nftables\n\n"
 	@printf "Container management:\n"
+	@printf "  make oauth__admin@ex.com.done      Create GitHub-login broker (needs /etc/vps-mcp/oauth.env)\n"
 	@printf "  make alice__alice@ex.com.done      Create VPS for alice\n"
 	@printf "  make default__admin@ex.com.done    Create default container (serves parent domain)\n"
 	@printf "  make list                          List running VPS containers\n\n"
@@ -208,7 +209,18 @@ sshsec.done:
 # ── container creation ────────────────────────────────────────────────────────
 # Usage: make alice__alice@gmail.com.done
 #        make default__admin@gmail.com.done   (serves parent domain, not default.DOMAIN)
+#        make oauth__admin@gmail.com.done     (GitHub-login broker; needs
+#                                              /etc/vps-mcp/oauth.env, see below)
 # DOMAIN is read automatically from /etc/vps-mcp/host.env after setupdone.
+#
+# GitHub OAuth login: create the oauth container once. It is the single
+# registered GitHub redirect target (https://oauth.DOMAIN/mcp/callback) and the
+# only container that holds the GitHub OAuth App credentials. Put them in
+# /etc/vps-mcp/oauth.env (mode 600) before running the oauth target:
+#     GITHUB_CLIENT_ID=...
+#     GITHUB_CLIENT_SECRET=...
+# Every other container only learns OAUTH_BASE (https://oauth.DOMAIN) and grants
+# a Bearer when the GitHub login's verified primary email matches NOTIFY_EMAIL.
 
 %.done:
 	$(eval _SUB      := $(call sub_of,$*))
@@ -216,6 +228,8 @@ sshsec.done:
 	$(eval _SUBDOMAIN := $(if $(filter default,$(_SUB)),$(DOMAIN),$(_SUB).$(DOMAIN)))
 	@test -n "$(DOMAIN)" || \
 	    { echo "Error: DOMAIN not set.  Run make IP__DOMAIN.setupdone first."; exit 1; }
+	@test "$(_SUB)" != oauth || test -f /etc/vps-mcp/oauth.env || \
+	    { echo "Error: create /etc/vps-mcp/oauth.env (mode 600) with GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET before making the oauth container."; exit 1; }
 	podman run -d \
 	    --name     $(_SUB)-web \
 	    --hostname $(_SUBDOMAIN) \
@@ -227,6 +241,8 @@ sshsec.done:
 	    --env      SUBDOMAIN=$(_SUBDOMAIN) \
 	    --env      MAIL_DOMAIN=$(_SUB).$(DOMAIN) \
 	    --env      NOTIFY_EMAIL=$(_EMAIL) \
+	    --env      OAUTH_BASE=https://oauth.$(DOMAIN) \
+	    $(if $(filter oauth,$(_SUB)),--env-file /etc/vps-mcp/oauth.env,) \
 	    $(IMAGE)
 	@echo "Letting the proxy refresh its routing table for the new container..."
 	@sleep 10
