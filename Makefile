@@ -58,6 +58,11 @@ help:
 	hostnamectl set-hostname $(_DOMAIN)
 	mkdir -p /etc/vps-mcp
 	printf 'DOMAIN=%s\nIP=%s\n' "$(_DOMAIN)" "$(_IP)" > /etc/vps-mcp/host.env
+	if [ ! -e /etc/vps-mcp/oauth.env ]; then \
+	    printf 'GITHUB_CLIENT_ID=...\nGITHUB_CLIENT_SECRET=...\n' > /etc/vps-mcp/oauth.env; \
+	    chmod 600 /etc/vps-mcp/oauth.env; \
+	    echo "Created /etc/vps-mcp/oauth.env template — fill in GitHub OAuth App credentials before 'make oauth__...done'."; \
+	fi
 	if [ ! -e /swapfile ]; then \
 	    fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024; \
 	    chmod 600 /swapfile; \
