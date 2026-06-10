@@ -133,7 +133,8 @@ single dedicated `oauth` container that brokers logins for every other container
 1. Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps → New):
    - **Homepage URL**: `https://oauth.example.com`
    - **Authorization callback URL**: `https://oauth.example.com/mcp/callback`
-2. Save its credentials to `/etc/vps-mcp/oauth.env` (mode 600) on the host:
+2. Fill in `/etc/vps-mcp/oauth.env` (host setup already created it as a mode-600
+   template; edit in the real values):
    ```
    GITHUB_CLIENT_ID=...
    GITHUB_CLIENT_SECRET=...
