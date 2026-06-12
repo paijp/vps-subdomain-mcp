@@ -108,8 +108,8 @@ Subject: VPS ready: ${SUBDOMAIN}
 
 Your VPS container is ready. Add it as a custom connector in Claude.ai:
 
+  Name: ${SUBDOMAIN}
   URL:  https://${SUBDOMAIN}/mcp/sse
-  Name: any label you like (e.g. ${SUBDOMAIN})
 
 When prompted, sign in with the GitHub account whose verified email is
 ${NOTIFY_EMAIL}. Only that account is granted access to this container.
