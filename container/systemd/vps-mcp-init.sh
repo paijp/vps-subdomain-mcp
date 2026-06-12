@@ -98,14 +98,21 @@ systemctl enable --now mcp-server
 
 # ── 8. Creation notification ─────────────────────────────────────────────────
 # Sends a test email to NOTIFY_EMAIL so the operator can confirm the mail
-# path (container → host relay → external) before the token-issuance mail.
+# path (container → host relay → external) before the token-issuance mail,
+# and gives the exact connector details to register in Claude.ai.
 if [[ -n "${NOTIFY_EMAIL}" ]]; then
     /usr/sbin/sendmail -f "noreply@${MAIL_DOMAIN}" "${NOTIFY_EMAIL}" <<EOF
 From: noreply@${MAIL_DOMAIN}
 To: ${NOTIFY_EMAIL}
-Subject: created: ${SUBDOMAIN}
+Subject: VPS ready: ${SUBDOMAIN}
 
-Container ready. MCP SSE endpoint: https://${SUBDOMAIN}/mcp/sse
+Your VPS container is ready. Add it as a custom connector in Claude.ai:
+
+  URL:  https://${SUBDOMAIN}/mcp/sse
+  Name: any label you like (e.g. ${SUBDOMAIN})
+
+When prompted, sign in with the GitHub account whose verified email is
+${NOTIFY_EMAIL}. Only that account is granted access to this container.
 EOF
 fi
 
